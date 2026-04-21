@@ -47,7 +47,7 @@ def _recovery_bar(rate: float) -> str:
     else:
         filled = max(1, min(10, math.floor(clamped * 10)))
     bar = "#" * filled + "-" * (10 - filled)
-    return f"[{bar}] {clamped:.0%}"
+    return f"[{bar}] {int(clamped * 100)}%"
 
 
 def _explain(sp: ScoredPattern, total_runs: int) -> str:

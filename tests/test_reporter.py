@@ -41,6 +41,12 @@ def test_recovery_bar_does_not_overflow():
     assert "-" not in inner
 
 
+def test_recovery_bar_near_full_does_not_show_100_percent():
+    # 0.999 floors to 9 blocks — label must not say 100%
+    bar = _recovery_bar(0.999)
+    assert bar == "[#########-] 99%"
+
+
 # ---------------------------------------------------------------------------
 # _explain
 # ---------------------------------------------------------------------------
