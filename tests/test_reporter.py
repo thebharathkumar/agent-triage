@@ -109,7 +109,7 @@ def test_explain_includes_divergence_fields():
 def test_explain_no_divergence_omits_divergence_note():
     sp = _make_scored(divergence_fields=[])
     text = _explain(sp, total_runs=3)
-    assert "divergence" not in text.lower() or "Belief divergence" not in text
+    assert "divergence" not in text.lower()
 
 
 def test_explain_unclassified():
