@@ -42,7 +42,11 @@ NEXT_ACTIONS: dict[str, str] = {
 
 def _fmt_pct(rate: float) -> str:
     """Format a 0–1 rate as a truncated integer percentage string."""
-    return f"{math.floor(rate * 100 + 1e-9)}%"
+    clamped = max(0.0, min(rate, 1.0))
+    pct = math.floor(clamped * 100 + 1e-9)
+    if clamped < 1.0:
+        pct = min(pct, 99)
+    return f"{pct}%"
 
 
 def _recovery_bar(rate: float) -> str:
