@@ -41,7 +41,12 @@ NEXT_ACTIONS: dict[str, str] = {
 
 
 def _fmt_pct(rate: float) -> str:
-    """Format a 0–1 rate as a truncated integer percentage string."""
+    """Format a rate as a truncated integer percentage string.
+
+    The input is first clamped into the 0.0–1.0 range. Values below 1.0
+    are capped at 99% after truncation, so this only returns 100% when the
+    clamped input is exactly 1.0.
+    """
     clamped = max(0.0, min(rate, 1.0))
     pct = math.floor(clamped * 100 + 1e-9)
     if clamped < 1.0:
