@@ -53,47 +53,6 @@ class LoadResult(BaseModel):
     parse_errors: list[str]
 
 
-def _extract_otlp_events(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extract events from an OTLP resourceSpans payload."""
-    events = []
-    for rs in data.get("resourceSpans", []):
-        for ss in rs.get("scopeSpans", []):
-            for span in ss.get("spans", []):
-                event_data: dict[str, Any] = {}
-                for attr in span.get("attributes", []):
-                    key = attr.get("key")
-                    val_obj = attr.get("value", {})
-                    
-                    val: Any = None
-                    if "stringValue" in val_obj:
-                        val = val_obj["stringValue"]
-                        if isinstance(val, str) and (val.startswith("{") or val.startswith("[")):
-                            try:
-                                val = json.loads(val)
-                            except json.JSONDecodeError:
-                                pass
-                    elif "intValue" in val_obj:
-                        val = int(val_obj["intValue"])
-                    elif "boolValue" in val_obj:
-                        val = bool(val_obj["boolValue"])
-                    elif "doubleValue" in val_obj:
-                        val = float(val_obj["doubleValue"])
-                    elif "arrayValue" in val_obj:
-                        values = val_obj["arrayValue"].get("values", [])
-                        val = [v.get("stringValue", v.get("intValue")) for v in values]
-                        
-                    if key:
-                        event_data[key] = val
-                        
-                if "event_id" not in event_data:
-                    event_data["event_id"] = span.get("spanId", "unknown")
-                if "run_id" not in event_data:
-                    event_data["run_id"] = span.get("traceId", "unknown")
-                    
-                events.append(event_data)
-    return events
-
-
 def load_files(paths: list[Path]) -> LoadResult:
     """Read one or more NDJSON files and return all validated TraceEvents."""
     events: list[TraceEvent] = []
@@ -114,17 +73,8 @@ def load_files(paths: list[Path]) -> LoadResult:
                 continue
             try:
                 data = json.loads(line)
-                if "resourceSpans" in data:
-                    otlp_events = _extract_otlp_events(data)
-                    for ev_data in otlp_events:
-                        try:
-                            event = TraceEvent.model_validate(ev_data)
-                            events.append(event)
-                        except Exception as exc:
-                            parse_errors.append(f"{path}:{lineno}: {exc}")
-                else:
-                    event = TraceEvent.model_validate(data)
-                    events.append(event)
+                event = TraceEvent.model_validate(data)
+                events.append(event)
             except (json.JSONDecodeError, Exception) as exc:
                 parse_errors.append(f"{path}:{lineno}: {exc}")
 

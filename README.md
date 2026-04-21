@@ -117,40 +117,6 @@ Three is the number of things a person can hold in working memory while still be
 
 ---
 
-## Running as a Pipeline
-
-The triage scoring engine can run as a live service inside a full observability pipeline. The provided Docker Compose stack mirrors `prove-ai/observability-pipeline` architecture with:
-- **Envoy Proxy**: Centralized API key auth on all external traffic
-- **OpenTelemetry Collector**: Ingests OTLP spans, computes span metrics, and writes raw traces to a shared volume
-- **Prometheus & VictoriaMetrics**: Long-term metrics storage
-- **Triage Service**: Runs the scoring model continuously over ingested spans and serves a glassmorphism web UI
-
-### Start the Pipeline
-
-```bash
-cd docker-compose
-docker compose --profile full up -d
-```
-
-### Access Points
-
-| Service | Address | Description |
-|---------|---------|-------------|
-| Triage UI | `http://localhost:7070/` | Live, auto-refreshing severity report |
-| Triage API | `http://localhost:7070/api/report` | JSON output of scored patterns |
-| OTLP HTTP | `http://localhost:4318/v1/traces` | Span ingestion (requires `X-API-Key: placeholder_api_key`) |
-| Prometheus | `http://localhost:9090` | Metrics dashboard |
-
-### Pipeline Profiles
-
-If you don't need the full infra, you can run isolated pieces:
-- `docker compose --profile triage-only up -d`: Just the Triage Service reading from your local `runs/` directory (great for demos).
-- `docker compose --profile no-triage up -d`: Just the standard OTel/Prometheus stack without the triage layer.
-
-For full details, see [docker-compose/README.md](docker-compose/README.md).
-
----
-
 ## Example Output
 
 See [examples/seed42-report.md](examples/seed42-report.md) for a real report generated from `runs/phase4/events_seed42.ndjson`.
