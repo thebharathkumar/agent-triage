@@ -57,6 +57,11 @@ def test_fmt_pct_exact_value_not_penalised():
     assert _fmt_pct(0.57) == "57%"
 
 
+def test_fmt_pct_near_one_does_not_round_up_to_100_percent():
+    # epsilon must never push a sub-1.0 value to 100%
+    assert _fmt_pct(0.999999999999) == "99%"
+
+
 # ---------------------------------------------------------------------------
 # _explain
 # ---------------------------------------------------------------------------
