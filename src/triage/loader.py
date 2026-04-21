@@ -75,7 +75,7 @@ def load_files(paths: list[Path]) -> LoadResult:
                 data = json.loads(line)
                 event = TraceEvent.model_validate(data)
                 events.append(event)
-            except (json.JSONDecodeError, Exception) as exc:
+            except (json.JSONDecodeError, ValueError) as exc:
                 parse_errors.append(f"{path}:{lineno}: {exc}")
 
     return LoadResult(
