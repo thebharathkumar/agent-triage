@@ -40,6 +40,11 @@ NEXT_ACTIONS: dict[str, str] = {
 }
 
 
+def _fmt_pct(rate: float) -> str:
+    """Format a 0–1 rate as a truncated integer percentage string."""
+    return f"{math.floor(rate * 100 + 1e-9)}%"
+
+
 def _recovery_bar(rate: float) -> str:
     clamped = max(0.0, min(rate, 1.0))
     if clamped == 0.0:
@@ -47,7 +52,7 @@ def _recovery_bar(rate: float) -> str:
     else:
         filled = max(1, min(10, math.floor(clamped * 10)))
     bar = "#" * filled + "-" * (10 - filled)
-    return f"[{bar}] {int(clamped * 100)}%"
+    return f"[{bar}] {_fmt_pct(clamped)}"
 
 
 def _explain(sp: ScoredPattern, total_runs: int) -> str:
@@ -64,7 +69,7 @@ def _explain(sp: ScoredPattern, total_runs: int) -> str:
         )
     else:
         recovery_note = (
-            f"About {sp.recovery_rate:.0%} of occurrences were followed by a "
+            f"About {_fmt_pct(sp.recovery_rate)} of occurrences were followed by a "
             f"successful action within {RECOVERY_WINDOW} turns, suggesting partial self-correction."
         )
 
