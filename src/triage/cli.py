@@ -25,7 +25,7 @@ from triage.scorer import score_patterns
 @click.option(
     "--top",
     "-n",
-    type=int,
+    type=click.IntRange(min=1),
     default=3,
     show_default=True,
     help="Number of top incidents to include in the report.",
@@ -76,7 +76,11 @@ def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
     )
 
     if output:
-        output.write_text(report, encoding="utf-8")
-        click.echo(f"Report written to {output}", err=True)
+        try:
+            output.write_text(report, encoding="utf-8")
+            click.echo(f"Report written to {output}", err=True)
+        except OSError as exc:
+            click.echo(f"Error writing to {output}: {exc}", err=True)
+            sys.exit(1)
     else:
         click.echo(report)
