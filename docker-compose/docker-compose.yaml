@@ -1,0 +1,142 @@
+---
+# Triage Observability Pipeline
+# Mirrors the prove-ai/observability-pipeline architecture with the triage
+# scoring engine added as a first-class service.
+#
+# Usage:
+#   docker compose --profile full up -d          # Full stack
+#   docker compose --profile triage-only up -d   # Triage UI only (reads local NDJSON)
+#   docker compose --profile no-vm up -d         # No VictoriaMetrics
+#   docker compose --profile no-triage up -d     # prove-ai-equivalent, no triage layer
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Envoy Proxy - API key authentication on all external ports
+  # ---------------------------------------------------------------------------
+  envoy:
+    build:
+      context: ./envoy
+      dockerfile: Dockerfile.envoy
+    image: triage-pipeline-envoy:latest
+    container_name: triage-envoy
+    env_file:
+      - .env
+    environment:
+      - ENVOY_API_KEY=${ENVOY_API_KEY:-placeholder_api_key}
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "9090:9090"   # Prometheus
+      - "8428:8428"   # VictoriaMetrics
+      - "9901:9901"   # Envoy admin (localhost)
+    networks:
+      - observability
+    restart: unless-stopped
+    profiles:
+      - full
+      - no-vm
+      - no-triage
+
+  # ---------------------------------------------------------------------------
+  # OTel Collector - receives OTLP spans, converts to metrics + writes NDJSON
+  # ---------------------------------------------------------------------------
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.138.0
+    container_name: triage-otel-collector
+    command: ["--config", "/etc/otel/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel/config.yaml:ro
+      - span_data:/var/spans
+    ports:
+      - "8888:8888"   # Collector internal metrics
+      - "8889:8889"   # Prometheus exporter
+      - "13133:13133" # Health check
+    networks:
+      - observability
+    restart: unless-stopped
+    profiles:
+      - full
+      - no-vm
+      - no-triage
+
+  # ---------------------------------------------------------------------------
+  # Prometheus - scrapes OTel exporter, remote_writes to VictoriaMetrics
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: triage-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yaml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - observability
+    restart: unless-stopped
+    depends_on:
+      - otel-collector
+    profiles:
+      - full
+      - no-vm
+      - no-triage
+
+  # ---------------------------------------------------------------------------
+  # VictoriaMetrics - long-term storage (12 months retention)
+  # ---------------------------------------------------------------------------
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:latest
+    container_name: triage-victoriametrics
+    command:
+      - "-retentionPeriod=12"
+      - "-httpListenAddr=:8428"
+    volumes:
+      - victoriametrics_data:/victoria-metrics-data
+    networks:
+      - observability
+    restart: unless-stopped
+    profiles:
+      - full
+      - no-triage
+
+  # ---------------------------------------------------------------------------
+  # Triage Service - severity scoring engine + web UI
+  # Reads from:
+  #   - span_data volume (OTLP spans written by OTel collector)
+  #   - ../runs/ (local NDJSON files from dungeon-traces)
+  # ---------------------------------------------------------------------------
+  triage:
+    build:
+      context: ../triage-service
+      dockerfile: Dockerfile
+    image: triage-service:latest
+    container_name: triage-service
+    environment:
+      - TRIAGE_RUNS_DIR=/data/runs
+      - TRIAGE_SPANS_DIR=/data/spans
+      - TRIAGE_REFRESH_SECONDS=${TRIAGE_REFRESH_SECONDS:-60}
+      - TRIAGE_TOP_N=${TRIAGE_TOP_N:-3}
+    volumes:
+      - ../runs:/data/runs:ro
+      - span_data:/data/spans:ro
+    ports:
+      - "7070:7070"   # Triage UI + API
+    networks:
+      - observability
+    restart: unless-stopped
+    profiles:
+      - full
+      - triage-only
+      - no-vm
+      - no-triage
+
+volumes:
+  span_data:
+  prometheus_data:
+  victoriametrics_data:
+
+networks:
+  observability:
+    driver: bridge
