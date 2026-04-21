@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
 
 from triage.loader import TraceEvent
@@ -56,7 +55,7 @@ def group_events(events: list[TraceEvent]) -> list[IncidentPattern]:
     is not None are considered incidents. Events with both action_succeeded
     True and no classification are normal operations and are skipped.
     """
-    buckets: dict[tuple, IncidentPattern] = defaultdict(lambda: None)  # type: ignore
+    buckets: dict[tuple, IncidentPattern] = {}
     ordered: list[tuple] = []
 
     for event in events:
@@ -67,7 +66,7 @@ def group_events(events: list[TraceEvent]) -> list[IncidentPattern]:
             continue
 
         key = _make_key(event)
-        if key not in buckets or buckets[key] is None:
+        if key not in buckets:
             agent_id, tool_name, classification, div_fields = key
             pattern_id = f"{agent_id}-{tool_name}-{classification}"
             buckets[key] = IncidentPattern(
