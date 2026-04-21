@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from triage.loader import ActionTaken, Latency, TraceEvent, Usage
 
 
