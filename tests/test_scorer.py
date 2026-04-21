@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tests.conftest import make_event
 from triage.grouper import group_events
 from triage.scorer import (

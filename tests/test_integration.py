@@ -5,15 +5,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from tests.conftest import make_event
 from triage.cli import main
 from triage.grouper import group_events
-from triage.reporter import build_report, CLASSIFICATION_LABELS
+from triage.reporter import CLASSIFICATION_LABELS, build_report
 from triage.scorer import score_patterns
-
 
 # ---------------------------------------------------------------------------
 # Shared fixture data
@@ -105,7 +103,9 @@ class TestBuildReport:
                 event_id=f"e{i}",
                 agent_id=["A", "B", "C"][i % 3],
                 action_succeeded=False,
-                failure_classification=["agent_error", "coordination_failure", "information_lag"][i % 3],
+                failure_classification=[
+                    "agent_error", "coordination_failure", "information_lag"
+                ][i % 3],
             )
             for i in range(3)
         ]
@@ -187,7 +187,9 @@ class TestCLI:
                 MINIMAL_EVENT,
                 event_id=f"e{i}",
                 agent_id=["A", "B", "C"][i],
-                failure_classification=["agent_error", "coordination_failure", "information_lag"][i],
+                failure_classification=[
+                    "agent_error", "coordination_failure", "information_lag"
+                ][i],
             )
             for i in range(3)
         ]

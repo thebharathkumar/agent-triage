@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import datetime
+import math
 
-from triage.grouper import IncidentPattern
-from triage.scorer import ScoredPattern
+from triage.scorer import RECOVERY_WINDOW, ScoredPattern
 
 # Human-readable descriptions for each failure classification
 CLASSIFICATION_LABELS: dict[str, str] = {
@@ -41,7 +41,7 @@ NEXT_ACTIONS: dict[str, str] = {
 
 
 def _recovery_bar(rate: float) -> str:
-    filled = round(rate * 10)
+    filled = math.ceil(rate * 10) if rate > 0 else 0
     bar = "#" * filled + "-" * (10 - filled)
     return f"[{bar}] {rate:.0%}"
 
@@ -56,12 +56,12 @@ def _explain(sp: ScoredPattern, total_runs: int) -> str:
     if sp.recovery_rate == 0.0:
         recovery_note = (
             "None of these failures were followed by a successful action "
-            f"within {3} turns, meaning the agent got stuck rather than adapting."
+            f"within {RECOVERY_WINDOW} turns, meaning the agent got stuck rather than adapting."
         )
     else:
         recovery_note = (
             f"About {sp.recovery_rate:.0%} of occurrences were followed by a "
-            "successful action within 3 turns, suggesting partial self-correction."
+            f"successful action within {RECOVERY_WINDOW} turns, suggesting partial self-correction."
         )
 
     div_note = ""
@@ -89,7 +89,7 @@ def build_report(
     source_files: list[str],
     top_n: int = 3,
 ) -> str:
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    now = datetime.datetime.now(tz=datetime.UTC)
     date_str = now.strftime("%Y-%m-%d %H:%M UTC")
     top = scored[:top_n]
 
@@ -125,7 +125,7 @@ def build_report(
         lines.append(f"**Category:** {label}")
         lines.append("")
         lines.append(
-            f"| Metric | Value |"
+            "| Metric | Value |"
         )
         lines.append("|--------|-------|")
         lines.append(f"| Severity Score | {sp.severity_score:.2f} / 15.00 |")
