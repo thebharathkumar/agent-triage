@@ -44,7 +44,7 @@ class TraceEvent(BaseModel):
     def coerce_null_string(cls, v: Any) -> str | None:
         if v in (None, "null", ""):
             return None
-        return v
+        return str(v)
 
 
 class LoadResult(BaseModel):

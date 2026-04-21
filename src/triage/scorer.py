@@ -32,7 +32,24 @@ class ScoredPattern:
     final_score: float
 
 
-def _compute_recovery_rate(pattern: IncidentPattern, all_events: list[TraceEvent]) -> float:
+AgentTimeline = dict[tuple[str, str], list[tuple[int, bool]]]
+
+
+def _build_agent_timeline(all_events: list[TraceEvent]) -> AgentTimeline:
+    timeline: AgentTimeline = {}
+    for ev in all_events:
+        key = (ev.run_id, ev.agent_id)
+        if key not in timeline:
+            timeline[key] = []
+        timeline[key].append((ev.turn, ev.action_succeeded))
+    for key in timeline:
+        timeline[key].sort(key=lambda x: x[0])
+    return timeline
+
+
+def _compute_recovery_rate(
+    pattern: IncidentPattern, timeline: AgentTimeline
+) -> float:
     """Estimate what fraction of failures were followed by a success.
 
     For each failed event, we check whether the same agent succeeds with any
@@ -41,27 +58,14 @@ def _compute_recovery_rate(pattern: IncidentPattern, all_events: list[TraceEvent
     if not pattern.events:
         return 0.0
 
-    # Index all events by (run_id, agent_id) -> sorted list of (turn, succeeded)
-    agent_timeline: dict[tuple[str, str], list[tuple[int, bool]]] = {}
-    for ev in all_events:
-        key = (ev.run_id, ev.agent_id)
-        if key not in agent_timeline:
-            agent_timeline[key] = []
-        agent_timeline[key].append((ev.turn, ev.action_succeeded))
-
-    # Sort each timeline by turn
-    for key in agent_timeline:
-        agent_timeline[key].sort(key=lambda x: x[0])
-
     recovered = 0
     for incident in pattern.events:
         key = (incident.run_id, incident.agent_id)
-        timeline = agent_timeline.get(key, [])
+        agent_turns = timeline.get(key, [])
         failure_turn = incident.turn
-        # Look for any success within RECOVERY_WINDOW turns after failure
         found_recovery = any(
             succeeded
-            for turn, succeeded in timeline
+            for turn, succeeded in agent_turns
             if failure_turn < turn <= failure_turn + RECOVERY_WINDOW
         )
         if found_recovery:
@@ -77,6 +81,7 @@ def score_patterns(
 ) -> list[ScoredPattern]:
     """Score each incident pattern and return a sorted list (highest first)."""
     scored: list[ScoredPattern] = []
+    timeline = _build_agent_timeline(all_events)
 
     # Frequency normalization denominator: avoid div-by-zero
     max_freq = max((p.frequency for p in patterns), default=1)
@@ -92,7 +97,7 @@ def score_patterns(
         )
 
         # Recovery
-        recovery_rate = _compute_recovery_rate(pattern, all_events)
+        recovery_rate = _compute_recovery_rate(pattern, timeline)
 
         # Apply no-recovery multiplier when recovery rate is zero
         recovery_multiplier = 1.0 if recovery_rate > 0 else NO_RECOVERY_MULTIPLIER

@@ -55,8 +55,9 @@ def group_events(events: list[TraceEvent]) -> list[IncidentPattern]:
     is not None are considered incidents. Events with both action_succeeded
     True and no classification are normal operations and are skipped.
     """
-    buckets: dict[tuple, IncidentPattern] = {}
-    ordered: list[tuple] = []
+    Key = tuple[str, str, str, frozenset[str]]
+    buckets: dict[Key, IncidentPattern] = {}
+    ordered: list[Key] = []
 
     for event in events:
         is_failure = (not event.action_succeeded) or (
