@@ -6,7 +6,7 @@ from click.testing import CliRunner
 
 from tests.conftest import make_event
 from triage.cli import main
-from triage.reporter import _explain, _recovery_bar
+from triage.reporter import _explain, _fmt_pct, _recovery_bar
 from triage.scorer import RECOVERY_WINDOW, ScoredPattern
 
 # ---------------------------------------------------------------------------
@@ -45,6 +45,16 @@ def test_recovery_bar_near_full_does_not_show_100_percent():
     # 0.999 floors to 9 blocks — label must not say 100%
     bar = _recovery_bar(0.999)
     assert bar == "[#########-] 99%"
+
+
+def test_fmt_pct_handles_float_imprecision():
+    # 4/7 ≈ 0.5714285... — int() would give 57, floor+epsilon must too
+    assert _fmt_pct(4 / 7) == "57%"
+
+
+def test_fmt_pct_exact_value_not_penalised():
+    # 0.57 stored as 0.5699999... should still show 57%, not 56%
+    assert _fmt_pct(0.57) == "57%"
 
 
 # ---------------------------------------------------------------------------
