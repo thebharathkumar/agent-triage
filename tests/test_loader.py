@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import json
-import textwrap
 from pathlib import Path
 
-import pytest
-
-from triage.loader import TraceEvent, load_files
+from triage.loader import load_files
 
 
 def _write_ndjson(tmp_path: Path, lines: list[dict]) -> Path:
     p = tmp_path / "test.ndjson"
-    p.write_text("\n".join(json.dumps(l) for l in lines))
+    p.write_text("\n".join(json.dumps(row) for row in lines))
     return p
 
 

@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from click.testing import CliRunner
 
 from tests.conftest import make_event
 from triage.cli import main
-from triage.grouper import group_events
-from triage.reporter import _recovery_bar, _explain, build_report
-from triage.scorer import RECOVERY_WINDOW, ScoredPattern, score_patterns
-
+from triage.reporter import _explain, _recovery_bar
+from triage.scorer import RECOVERY_WINDOW, ScoredPattern
 
 # ---------------------------------------------------------------------------
 # _recovery_bar

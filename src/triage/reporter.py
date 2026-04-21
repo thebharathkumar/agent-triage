@@ -5,7 +5,6 @@ from __future__ import annotations
 import datetime
 import math
 
-from triage.grouper import IncidentPattern
 from triage.scorer import RECOVERY_WINDOW, ScoredPattern
 
 # Human-readable descriptions for each failure classification
@@ -90,7 +89,7 @@ def build_report(
     source_files: list[str],
     top_n: int = 3,
 ) -> str:
-    now = datetime.datetime.now(tz=datetime.timezone.utc)
+    now = datetime.datetime.now(tz=datetime.UTC)
     date_str = now.strftime("%Y-%m-%d %H:%M UTC")
     top = scored[:top_n]
 
@@ -126,7 +125,7 @@ def build_report(
         lines.append(f"**Category:** {label}")
         lines.append("")
         lines.append(
-            f"| Metric | Value |"
+            "| Metric | Value |"
         )
         lines.append("|--------|-------|")
         lines.append(f"| Severity Score | {sp.severity_score:.2f} / 15.00 |")
