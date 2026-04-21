@@ -41,9 +41,13 @@ NEXT_ACTIONS: dict[str, str] = {
 
 
 def _recovery_bar(rate: float) -> str:
-    filled = math.ceil(rate * 10) if rate > 0 else 0
+    clamped = max(0.0, min(rate, 1.0))
+    if clamped == 0.0:
+        filled = 0
+    else:
+        filled = max(1, min(10, math.floor(clamped * 10)))
     bar = "#" * filled + "-" * (10 - filled)
-    return f"[{bar}] {rate:.0%}"
+    return f"[{bar}] {clamped:.0%}"
 
 
 def _explain(sp: ScoredPattern, total_runs: int) -> str:

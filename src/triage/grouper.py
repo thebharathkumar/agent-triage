@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TypeAlias
 
 from triage.loader import TraceEvent
 
@@ -38,7 +39,10 @@ class IncidentPattern:
         )
 
 
-def _make_key(event: TraceEvent) -> tuple[str, str, str, frozenset[str]]:
+PatternKey: TypeAlias = tuple[str, str, str, frozenset[str]]
+
+
+def _make_key(event: TraceEvent) -> PatternKey:
     classification = event.failure_classification or "unclassified"
     return (
         event.agent_id,
@@ -55,9 +59,8 @@ def group_events(events: list[TraceEvent]) -> list[IncidentPattern]:
     is not None are considered incidents. Events with both action_succeeded
     True and no classification are normal operations and are skipped.
     """
-    Key = tuple[str, str, str, frozenset[str]]
-    buckets: dict[Key, IncidentPattern] = {}
-    ordered: list[Key] = []
+    buckets: dict[PatternKey, IncidentPattern] = {}
+    ordered: list[PatternKey] = []
 
     for event in events:
         is_failure = (not event.action_succeeded) or (
