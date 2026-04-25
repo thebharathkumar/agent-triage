@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from statistics import median
 
 from triage.grouper import IncidentPattern
 from triage.loader import TraceEvent
@@ -22,6 +23,14 @@ NO_RECOVERY_MULTIPLIER = 1.5
 # How many turns after a failure to look for recovery
 RECOVERY_WINDOW = 3
 
+# Window used for the tail-risk signal. Failures that stay unrecovered after
+# this many turns are treated as "stuck for good", not merely slow.
+TAIL_RISK_WINDOW = 10
+
+# Occurrence count at which confidence reaches 1.0.
+# Below this, confidence scales linearly, so small samples are visibly low.
+CONFIDENCE_THRESHOLD = 5
+
 
 @dataclass
 class ScoredPattern:
@@ -30,6 +39,17 @@ class ScoredPattern:
     severity_score: float
     recovery_rate: float
     final_score: float
+    confidence: float
+    median_recovery_latency: float | None
+    unrecovered_tail_count: int
+
+    @property
+    def confidence_label(self) -> str:
+        if self.confidence >= 0.8:
+            return "high"
+        if self.confidence >= 0.4:
+            return "medium"
+        return "low"
 
 
 AgentTimeline = dict[tuple[str, str], list[tuple[int, bool]]]
@@ -47,31 +67,67 @@ def _build_agent_timeline(all_events: list[TraceEvent]) -> AgentTimeline:
     return timeline
 
 
-def _compute_recovery_rate(
-    pattern: IncidentPattern, timeline: AgentTimeline
-) -> float:
-    """Estimate what fraction of failures were followed by a success.
+@dataclass
+class _RecoveryStats:
+    recovery_rate: float
+    median_latency: float | None
+    unrecovered_tail_count: int
 
-    For each failed event, we check whether the same agent succeeds with any
-    action within RECOVERY_WINDOW turns after the failure turn.
+
+def _compute_recovery_stats(
+    pattern: IncidentPattern, timeline: AgentTimeline
+) -> _RecoveryStats:
+    """Measure how and how quickly the agent recovered after each failure.
+
+    Returns:
+        recovery_rate: fraction of failures followed by a success within
+            RECOVERY_WINDOW turns.
+        median_latency: median turns-to-first-success across recovered events,
+            or None if no events recovered.
+        unrecovered_tail_count: failures with no success within
+            TAIL_RISK_WINDOW turns. This is the "still stuck after a long
+            while" signal.
     """
     if not pattern.events:
-        return 0.0
+        return _RecoveryStats(0.0, None, 0)
 
     recovered = 0
+    latencies: list[int] = []
+    tail_unrecovered = 0
+
     for incident in pattern.events:
         key = (incident.run_id, incident.agent_id)
         agent_turns = timeline.get(key, [])
         failure_turn = incident.turn
-        found_recovery = any(
-            succeeded
-            for turn, succeeded in agent_turns
-            if failure_turn < turn <= failure_turn + RECOVERY_WINDOW
-        )
-        if found_recovery:
-            recovered += 1
 
-    return recovered / len(pattern.events)
+        first_success_offset: int | None = None
+        for turn, succeeded in agent_turns:
+            if turn <= failure_turn or not succeeded:
+                continue
+            first_success_offset = turn - failure_turn
+            break
+
+        if first_success_offset is not None and first_success_offset <= RECOVERY_WINDOW:
+            recovered += 1
+            latencies.append(first_success_offset)
+
+        if first_success_offset is None or first_success_offset > TAIL_RISK_WINDOW:
+            tail_unrecovered += 1
+
+    return _RecoveryStats(
+        recovery_rate=recovered / len(pattern.events),
+        median_latency=float(median(latencies)) if latencies else None,
+        unrecovered_tail_count=tail_unrecovered,
+    )
+
+
+def _compute_confidence(frequency: int) -> float:
+    """Linearly scale confidence from 0 to 1 as occurrences approach threshold.
+
+    Small samples produce low confidence so that rankings built on thin
+    evidence are surfaced as such rather than presented with false precision.
+    """
+    return min(1.0, frequency / CONFIDENCE_THRESHOLD)
 
 
 def score_patterns(
@@ -96,11 +152,13 @@ def score_patterns(
             pattern.failure_classification, 0.3
         )
 
-        # Recovery
-        recovery_rate = _compute_recovery_rate(pattern, timeline)
+        # Recovery dynamics
+        recovery = _compute_recovery_stats(pattern, timeline)
 
         # Apply no-recovery multiplier when recovery rate is zero
-        recovery_multiplier = 1.0 if recovery_rate > 0 else NO_RECOVERY_MULTIPLIER
+        recovery_multiplier = (
+            1.0 if recovery.recovery_rate > 0 else NO_RECOVERY_MULTIPLIER
+        )
         severity_score = base_weight * 10.0 * recovery_multiplier
 
         # Final composite: weighted sum
@@ -111,8 +169,11 @@ def score_patterns(
                 pattern=pattern,
                 frequency_score=frequency_score,
                 severity_score=severity_score,
-                recovery_rate=recovery_rate,
+                recovery_rate=recovery.recovery_rate,
                 final_score=final_score,
+                confidence=_compute_confidence(pattern.frequency),
+                median_recovery_latency=recovery.median_latency,
+                unrecovered_tail_count=recovery.unrecovered_tail_count,
             )
         )
 

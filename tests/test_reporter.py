@@ -75,6 +75,9 @@ def _make_scored(
     frequency: int = 3,
     recovery_rate: float = 0.0,
     divergence_fields: list[str] | None = None,
+    median_recovery_latency: float | None = None,
+    unrecovered_tail_count: int = 0,
+    confidence: float | None = None,
 ) -> ScoredPattern:
     events = [
         make_event(
@@ -103,6 +106,9 @@ def _make_scored(
         severity_score=7.0,
         recovery_rate=recovery_rate,
         final_score=5.4,
+        confidence=confidence if confidence is not None else min(1.0, frequency / 5),
+        median_recovery_latency=median_recovery_latency,
+        unrecovered_tail_count=unrecovered_tail_count,
     )
 
 
@@ -137,6 +143,24 @@ def test_explain_unclassified():
     sp = _make_scored(classification="unclassified")
     text = _explain(sp, total_runs=2)
     assert "Unclassified" in text
+
+
+def test_explain_mentions_median_latency_when_recovered():
+    sp = _make_scored(recovery_rate=0.5, median_recovery_latency=2.0)
+    text = _explain(sp, total_runs=3)
+    assert "median latency" in text.lower()
+    assert "2" in text
+
+
+def test_explain_mentions_tail_risk_when_nonzero():
+    sp = _make_scored(
+        recovery_rate=0.5,
+        median_recovery_latency=1.0,
+        unrecovered_tail_count=2,
+    )
+    text = _explain(sp, total_runs=3)
+    assert "tail" in text.lower()
+    assert "2" in text
 
 
 # ---------------------------------------------------------------------------
