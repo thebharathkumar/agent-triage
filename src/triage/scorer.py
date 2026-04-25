@@ -32,14 +32,21 @@ TAIL_RISK_WINDOW = 10
 # Below this, confidence scales linearly, so small samples are visibly low.
 CONFIDENCE_THRESHOLD = 5
 
-# Relative change thresholds for trend classification. second-half-rate vs
-# first-half-rate ratios outside [1 - band, 1 + band] flip to decreasing /
+# Relative change thresholds for trend classification. recent-rate vs
+# baseline-rate ratios outside [1 - band, 1 + band] flip to decreasing /
 # increasing; inside, the pattern is "stable".
 TREND_BAND = 0.3
 
 # Minimum number of runs required to emit a directional trend. Below this
 # threshold we report "insufficient data" instead of guessing.
 TREND_MIN_RUNS = 3
+
+# Sliding-window size for trend detection. The most recent
+# TREND_WINDOW_SIZE runs are compared against the prior
+# TREND_WINDOW_SIZE runs. Sliding window kicks in when the input has
+# at least 2 * TREND_WINDOW_SIZE runs; below that we fall back to the
+# split-half partition so behavior remains useful on small batches.
+TREND_WINDOW_SIZE = 3
 
 
 @dataclass
@@ -163,32 +170,54 @@ def _compute_trend(
 ) -> str:
     """Classify the recurrence trend across runs.
 
-    Split the ordered run list into halves, compute per-run occurrence
-    rate in each half, and compare. Returns one of: "insufficient data",
-    "new", "resolved", "increasing", "decreasing", "stable".
+    Uses a sliding-window comparison when there are at least
+    2 * TREND_WINDOW_SIZE runs: per-run occurrence rate in the most
+    recent window is compared against the immediately prior window.
+    For shorter histories the function falls back to split-half so the
+    label remains directional on small batches rather than always
+    "insufficient data".
+
+    Returns one of: "insufficient data", "new", "resolved",
+    "increasing", "decreasing", "stable".
     """
-    if len(ordered_runs) < TREND_MIN_RUNS:
+    n = len(ordered_runs)
+    if n < TREND_MIN_RUNS:
         return "insufficient data"
 
-    midpoint = len(ordered_runs) // 2
-    first_runs = set(ordered_runs[:midpoint])
-    second_runs = set(ordered_runs[midpoint:])
+    if n >= 2 * TREND_WINDOW_SIZE:
+        baseline_runs = ordered_runs[-2 * TREND_WINDOW_SIZE : -TREND_WINDOW_SIZE]
+        recent_runs = ordered_runs[-TREND_WINDOW_SIZE:]
+    else:
+        midpoint = n // 2
+        baseline_runs = ordered_runs[:midpoint]
+        recent_runs = ordered_runs[midpoint:]
 
+    return _classify_window_change(pattern, baseline_runs, recent_runs)
+
+
+def _classify_window_change(
+    pattern: IncidentPattern,
+    baseline_runs: list[str],
+    recent_runs: list[str],
+) -> str:
+    """Per-run occurrence rate comparison between two run windows."""
     run_counts: Counter[str] = Counter(ev.run_id for ev in pattern.events)
-    first_total = sum(run_counts[r] for r in first_runs)
-    second_total = sum(run_counts[r] for r in second_runs)
+    baseline_total = sum(run_counts[r] for r in baseline_runs)
+    recent_total = sum(run_counts[r] for r in recent_runs)
 
-    first_rate = first_total / len(first_runs) if first_runs else 0.0
-    second_rate = second_total / len(second_runs) if second_runs else 0.0
+    baseline_rate = (
+        baseline_total / len(baseline_runs) if baseline_runs else 0.0
+    )
+    recent_rate = recent_total / len(recent_runs) if recent_runs else 0.0
 
-    if first_rate == 0 and second_rate > 0:
+    if baseline_rate == 0 and recent_rate > 0:
         return "new"
-    if first_rate > 0 and second_rate == 0:
+    if baseline_rate > 0 and recent_rate == 0:
         return "resolved"
-    if first_rate == 0 and second_rate == 0:
+    if baseline_rate == 0 and recent_rate == 0:
         return "stable"
 
-    ratio = second_rate / first_rate
+    ratio = recent_rate / baseline_rate
     if ratio >= 1 + TREND_BAND:
         return "increasing"
     if ratio <= 1 - TREND_BAND:

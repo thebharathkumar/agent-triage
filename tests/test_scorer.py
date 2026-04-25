@@ -9,6 +9,7 @@ from triage.scorer import (
     CONFIDENCE_THRESHOLD,
     NO_RECOVERY_MULTIPLIER,
     TAIL_RISK_WINDOW,
+    TREND_WINDOW_SIZE,
     score_patterns,
 )
 
@@ -316,6 +317,57 @@ class TestRecurrence:
         scored = [s for s in score_patterns(patterns, events, total_runs=4)
                   if s.pattern.agent_id == "A"][0]
         assert scored.trend == "new"
+
+    def test_trend_uses_sliding_window_for_long_history(self):
+        # 8 runs total. Pattern was hot in the middle (r3..r5) but
+        # cooled to almost nothing in the last 3. Split-half would
+        # report the rate as "stable" or even "increasing" because
+        # r5..r8 (second half) still has events. Sliding window with
+        # K=3 compares r6..r8 against r3..r5 and should detect the
+        # decline.
+        events = []
+        # Older runs with no failures — provides ordering anchor.
+        for run_id in ("r1", "r2"):
+            events.append(
+                make_event(
+                    event_id=f"ok-{run_id}",
+                    run_id=run_id,
+                    turn=0,
+                    agent_id="Z",
+                    action_succeeded=True,
+                )
+            )
+        # Baseline window (r3..r5): pattern fires 5 times per run.
+        for run_id in ("r3", "r4", "r5"):
+            events.extend(
+                self._events_across_runs({run_id: 5})
+            )
+        # Recent window (r6..r8): pattern fires 1 time per run.
+        for run_id in ("r6", "r7", "r8"):
+            events.extend(
+                self._events_across_runs({run_id: 1})
+            )
+        patterns = group_events(events)
+        scored = [
+            s for s in score_patterns(patterns, events, total_runs=8)
+            if s.pattern.agent_id == "A"
+        ][0]
+        assert scored.trend == "decreasing"
+
+    def test_trend_window_size_is_three(self):
+        # Self-documenting: confirm the contract that drives the
+        # 2 * TREND_WINDOW_SIZE threshold.
+        assert TREND_WINDOW_SIZE == 3
+
+    def test_trend_falls_back_to_split_half_on_short_history(self):
+        # 4 runs is less than 2 * TREND_WINDOW_SIZE = 6, so the split-
+        # half fallback applies.
+        events = self._events_across_runs(
+            {"r1": 1, "r2": 1, "r3": 5, "r4": 5}
+        )
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "increasing"
 
     def test_trend_resolved_when_absent_in_second_half(self):
         filler = [

@@ -1,0 +1,188 @@
+{
+  "spans": [
+    {
+      "span_id": "sp-0001",
+      "trace_id": "otel-trace-A",
+      "name": "observe",
+      "status": {
+        "code": "OK"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 0,
+        "failure_classification": null,
+        "divergence_fields": []
+      }
+    },
+    {
+      "span_id": "sp-0002",
+      "trace_id": "otel-trace-A",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 3,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0003",
+      "trace_id": "otel-trace-A",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 6,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0004",
+      "trace_id": "otel-trace-A",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 9,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0005",
+      "trace_id": "otel-trace-A",
+      "name": "fetch_documents",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "retriever",
+        "turn": 4,
+        "failure_classification": "information_lag",
+        "divergence_fields": [
+          "index_version"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0006",
+      "trace_id": "otel-trace-A",
+      "name": "fetch_documents",
+      "status": {
+        "code": "OK"
+      },
+      "attributes": {
+        "agent.id": "retriever",
+        "turn": 6,
+        "failure_classification": null,
+        "divergence_fields": []
+      }
+    },
+    {
+      "span_id": "sp-0007",
+      "trace_id": "otel-trace-B",
+      "name": "observe",
+      "status": {
+        "code": "OK"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 0,
+        "failure_classification": null,
+        "divergence_fields": []
+      }
+    },
+    {
+      "span_id": "sp-0008",
+      "trace_id": "otel-trace-B",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 3,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0009",
+      "trace_id": "otel-trace-B",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 6,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0010",
+      "trace_id": "otel-trace-B",
+      "name": "dispatch_subtask",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "planner",
+        "turn": 9,
+        "failure_classification": "coordination_failure",
+        "divergence_fields": [
+          "retriever_state"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0011",
+      "trace_id": "otel-trace-B",
+      "name": "fetch_documents",
+      "status": {
+        "code": "ERROR"
+      },
+      "attributes": {
+        "agent.id": "retriever",
+        "turn": 4,
+        "failure_classification": "information_lag",
+        "divergence_fields": [
+          "index_version"
+        ]
+      }
+    },
+    {
+      "span_id": "sp-0012",
+      "trace_id": "otel-trace-B",
+      "name": "fetch_documents",
+      "status": {
+        "code": "OK"
+      },
+      "attributes": {
+        "agent.id": "retriever",
+        "turn": 6,
+        "failure_classification": null,
+        "divergence_fields": []
+      }
+    }
+  ]
+}

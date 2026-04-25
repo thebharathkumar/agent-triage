@@ -77,6 +77,25 @@ class ClassificationDelta:
 
 
 @dataclass
+class ScoreSummary:
+    """Aggregate scoring metrics for a single batch.
+
+    Lets a comparison report show an at-a-glance "did things get
+    better overall" panel before drilling into per-classification
+    deltas. All fields are computed on the scored patterns the batch
+    produced, so the same numbers are visible to a reader who runs
+    `triage report` on either side independently.
+    """
+
+    pattern_count: int
+    failure_event_count: int
+    unrecovered_event_count: int
+    top_final_score: float
+    mean_final_score: float
+    coordination_failure_count: int
+
+
+@dataclass
 class ComparisonReport:
     before_run_count: int
     after_run_count: int
@@ -88,6 +107,8 @@ class ComparisonReport:
     persisting_patterns: list[tuple[ScoredPattern, ScoredPattern]] = field(
         default_factory=list
     )
+    before_summary: ScoreSummary | None = None
+    after_summary: ScoreSummary | None = None
 
 
 def _pct_change(before: int, after: int, tentative: bool = False) -> str:
@@ -183,6 +204,38 @@ def _index_by_pattern_id(scored: list[ScoredPattern]) -> dict[str, ScoredPattern
     return {sp.pattern.pattern_id: sp for sp in scored}
 
 
+def _summarize(scored: list[ScoredPattern]) -> ScoreSummary:
+    """Aggregate ScoredPatterns into a one-line health signature."""
+    if not scored:
+        return ScoreSummary(
+            pattern_count=0,
+            failure_event_count=0,
+            unrecovered_event_count=0,
+            top_final_score=0.0,
+            mean_final_score=0.0,
+            coordination_failure_count=0,
+        )
+
+    failure_total = sum(sp.pattern.frequency for sp in scored)
+    unrecovered_total = sum(
+        round(sp.pattern.frequency * (1 - sp.recovery_rate)) for sp in scored
+    )
+    final_scores = [sp.final_score for sp in scored]
+    coord_total = sum(
+        sp.pattern.frequency
+        for sp in scored
+        if sp.pattern.failure_classification == "coordination_failure"
+    )
+    return ScoreSummary(
+        pattern_count=len(scored),
+        failure_event_count=failure_total,
+        unrecovered_event_count=unrecovered_total,
+        top_final_score=max(final_scores),
+        mean_final_score=sum(final_scores) / len(final_scores),
+        coordination_failure_count=coord_total,
+    )
+
+
 def compare_event_batches(
     before_events: list[TraceEvent],
     after_events: list[TraceEvent],
@@ -252,6 +305,8 @@ def compare_event_batches(
         new_patterns=new_patterns,
         resolved_patterns=resolved_patterns,
         persisting_patterns=persisting,
+        before_summary=_summarize(before_scored),
+        after_summary=_summarize(after_scored),
     )
 
 
