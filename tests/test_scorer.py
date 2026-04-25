@@ -6,7 +6,9 @@ from tests.conftest import make_event
 from triage.grouper import group_events
 from triage.scorer import (
     CLASSIFICATION_WEIGHTS,
+    CONFIDENCE_THRESHOLD,
     NO_RECOVERY_MULTIPLIER,
+    TAIL_RISK_WINDOW,
     score_patterns,
 )
 
@@ -152,3 +154,182 @@ class TestScorePatterns:
         # With only one pattern, it should get frequency_score = 10.0
         scored = score_patterns(patterns, events, 1)
         assert abs(scored[0].frequency_score - 10.0) < 0.01
+
+
+class TestConfidence:
+    def test_confidence_scales_with_frequency(self):
+        low_patterns, low_events = _build_pattern_and_events(
+            classification="agent_error", count=1
+        )
+        high_patterns, high_events = _build_pattern_and_events(
+            classification="agent_error", count=CONFIDENCE_THRESHOLD,
+        )
+        low_scored = score_patterns(low_patterns, low_events, 1)[0]
+        high_scored = score_patterns(high_patterns, high_events, 1)[0]
+        assert low_scored.confidence < high_scored.confidence
+        assert high_scored.confidence == 1.0
+
+    def test_confidence_caps_at_one(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=CONFIDENCE_THRESHOLD * 4,
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence == 1.0
+
+    def test_confidence_label_low_for_single_occurrence(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=1
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence_label == "low"
+
+    def test_confidence_label_high_at_threshold(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=CONFIDENCE_THRESHOLD,
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence_label == "high"
+
+
+class TestRecoveryDynamics:
+    def test_median_latency_is_none_when_no_recoveries(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=2
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.median_recovery_latency is None
+
+    def test_median_latency_reports_turns_to_first_success(self):
+        # Failure at 0 recovers at turn 2; failure at 4 recovers at turn 5.
+        # Latencies: [2, 1] -> median 1.5
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=2,
+            recovery_turns=[2, 5],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.median_recovery_latency == 1.5
+
+    def test_tail_risk_counts_failures_unrecovered_beyond_window(self):
+        # Single failure at turn 0, success only at turn TAIL_RISK_WINDOW + 5
+        # -> still counted as tail-unrecovered.
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=1,
+            recovery_turns=[TAIL_RISK_WINDOW + 5],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.unrecovered_tail_count == 1
+
+    def test_tail_risk_zero_when_fast_recovery(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=1,
+            recovery_turns=[1],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.unrecovered_tail_count == 0
+
+
+class TestRecurrence:
+    def _events_across_runs(
+        self, run_counts: dict[str, int], classification: str = "agent_error"
+    ):
+        """Build failing events keyed by {run_id: failure_count}."""
+        events = []
+        idx = 0
+        for run_id, count in run_counts.items():
+            for i in range(count):
+                events.append(
+                    make_event(
+                        event_id=f"e{idx}",
+                        run_id=run_id,
+                        turn=i,
+                        agent_id="A",
+                        action_succeeded=False,
+                        failure_classification=classification,
+                    )
+                )
+                idx += 1
+        return events
+
+    def test_runs_seen_in_counts_unique_runs(self):
+        events = self._events_across_runs({"r1": 2, "r2": 1, "r3": 3})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=3)[0]
+        assert scored.runs_seen_in == 3
+        assert scored.runs_total == 3
+
+    def test_run_coverage_ratio(self):
+        events = self._events_across_runs({"r1": 1, "r2": 1})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.runs_seen_in == 2
+        assert scored.runs_total == 4
+        assert scored.run_coverage == 0.5
+
+    def test_trend_insufficient_data_below_threshold(self):
+        events = self._events_across_runs({"r1": 2, "r2": 2})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=2)[0]
+        assert scored.trend == "insufficient data"
+
+    def test_trend_stable_when_rate_unchanged(self):
+        events = self._events_across_runs({"r1": 2, "r2": 2, "r3": 2, "r4": 2})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "stable"
+
+    def test_trend_increasing_when_second_half_rises(self):
+        # First half (r1, r2) = 1 each; second half (r3, r4) = 5 each.
+        events = self._events_across_runs(
+            {"r1": 1, "r2": 1, "r3": 5, "r4": 5}
+        )
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "increasing"
+
+    def test_trend_decreasing_when_second_half_drops(self):
+        events = self._events_across_runs(
+            {"r1": 5, "r2": 5, "r3": 1, "r4": 1}
+        )
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "decreasing"
+
+    def test_trend_new_when_absent_in_first_half(self):
+        # Pattern only shows up in second half. Add filler events in early
+        # runs so the run ordering is visible.
+        filler = [
+            make_event(
+                event_id="ok-1", run_id="r1", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+            make_event(
+                event_id="ok-2", run_id="r2", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+        ]
+        events = filler + self._events_across_runs({"r3": 3, "r4": 3})
+        patterns = group_events(events)
+        scored = [s for s in score_patterns(patterns, events, total_runs=4)
+                  if s.pattern.agent_id == "A"][0]
+        assert scored.trend == "new"
+
+    def test_trend_resolved_when_absent_in_second_half(self):
+        filler = [
+            make_event(
+                event_id="ok-1", run_id="r3", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+            make_event(
+                event_id="ok-2", run_id="r4", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+        ]
+        events = self._events_across_runs({"r1": 3, "r2": 3}) + filler
+        patterns = group_events(events)
+        scored = [s for s in score_patterns(patterns, events, total_runs=4)
+                  if s.pattern.agent_id == "A"][0]
+        assert scored.trend == "resolved"
