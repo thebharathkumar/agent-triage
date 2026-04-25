@@ -383,3 +383,63 @@ class TestTentativeAndLatency:
         report = compare_event_batches(before, after)
         d = next(d for d in report.deltas if d.classification == "agent_error")
         assert d.latency_change.startswith("stable")
+
+
+class TestScoreSummary:
+    def test_summary_is_populated_for_both_sides(self):
+        before = _failures(classification="agent_error", count=3)
+        after = _failures(classification="agent_error", count=1)
+        report = compare_event_batches(before, after)
+        assert report.before_summary is not None
+        assert report.after_summary is not None
+        assert report.before_summary.failure_event_count == 3
+        assert report.after_summary.failure_event_count == 1
+
+    def test_summary_counts_distinct_patterns(self):
+        before = _failures(
+            classification="agent_error", count=2
+        ) + _failures(
+            classification="coordination_failure",
+            count=2,
+            agent_id="B",
+            tool_name="dispatch",
+        )
+        after = _failures(classification="agent_error", count=2)
+        report = compare_event_batches(before, after)
+        assert report.before_summary.pattern_count == 2
+        assert report.after_summary.pattern_count == 1
+
+    def test_summary_counts_coordination_failures(self):
+        before = _failures(classification="agent_error", count=2)
+        after = _failures(
+            classification="coordination_failure",
+            count=4,
+            agent_id="B",
+            tool_name="dispatch",
+        )
+        report = compare_event_batches(before, after)
+        assert report.before_summary.coordination_failure_count == 0
+        assert report.after_summary.coordination_failure_count == 4
+
+    def test_summary_empty_batch(self):
+        report = compare_event_batches([], _failures(
+            classification="agent_error", count=1
+        ))
+        assert report.before_summary is not None
+        assert report.before_summary.pattern_count == 0
+        assert report.before_summary.failure_event_count == 0
+
+
+def test_score_summary_renders_in_report():
+    before = _failures(classification="agent_error", count=3)
+    after = _failures(classification="agent_error", count=1)
+    text = build_comparison_report(
+        compare_event_batches(before, after),
+        before_path="b.ndjson",
+        after_path="a.ndjson",
+    )
+    assert "Score Summary" in text
+    assert "Distinct incident patterns" in text
+    assert "Failure events" in text
+
+
