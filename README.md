@@ -206,6 +206,40 @@ wrong tool when:
 
 ---
 
+## Observability for Agents Is Not Log Aggregation
+
+Multi-agent systems fail in ways traditional log infrastructure was not
+designed to surface. A coordination failure between two agents is
+structurally different from a 500 error: it has a recovery story, a
+belief-divergence story, and a recurrence story. Treating those as event
+lines to aggregate loses everything that matters.
+
+Four design choices follow from that stance, and together they are the
+reason `triage` looks the way it does:
+
+- **Top-3, not top-100.** Operators can act on three things at once. A
+  list of fifty incidents is a dashboard; a dashboard is not triage.
+- **Recovery latency, not just recovery.** "Did the agent succeed within
+  3 turns" is a binary. "How long did it take, and is the tail bounded"
+  is a control signal. Timeouts and retry budgets are tuned against the
+  latter, not the former.
+- **Recurrence orthogonal to severity.** Persistence and impact are
+  different axes. Fusing them would let a high-frequency wall-bump
+  outrank a rare planner desync — exactly the wrong prioritization for
+  a multi-agent system, where coordination errors propagate downstream
+  and environment errors do not.
+- **Confidence as a first-class field.** A score without an error bar is
+  a guess presented as a number. Surfacing `low` / `medium` / `high` per
+  pattern lets the operator decide whether the ranking is a verdict or
+  a hypothesis worth investigating.
+
+These are not features. They are the modeling stance: measure dynamics
+and persistence, not just events; show uncertainty rather than hide it;
+rank by what an operator can act on, not by what is statistically
+anomalous.
+
+---
+
 ## Design Decisions
 
 ### Why severity scoring instead of anomaly detection?
