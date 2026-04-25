@@ -78,6 +78,9 @@ def _make_scored(
     median_recovery_latency: float | None = None,
     unrecovered_tail_count: int = 0,
     confidence: float | None = None,
+    runs_seen_in: int = 1,
+    runs_total: int = 1,
+    trend: str = "insufficient data",
 ) -> ScoredPattern:
     events = [
         make_event(
@@ -109,6 +112,9 @@ def _make_scored(
         confidence=confidence if confidence is not None else min(1.0, frequency / 5),
         median_recovery_latency=median_recovery_latency,
         unrecovered_tail_count=unrecovered_tail_count,
+        runs_seen_in=runs_seen_in,
+        runs_total=runs_total,
+        trend=trend,
     )
 
 
@@ -161,6 +167,25 @@ def test_explain_mentions_tail_risk_when_nonzero():
     text = _explain(sp, total_runs=3)
     assert "tail" in text.lower()
     assert "2" in text
+
+
+def test_explain_mentions_recurrence_when_multi_run():
+    sp = _make_scored(runs_seen_in=7, runs_total=12, trend="stable")
+    text = _explain(sp, total_runs=12)
+    assert "7/12" in text
+    assert "stable" in text
+
+
+def test_explain_omits_recurrence_for_single_run():
+    sp = _make_scored(runs_seen_in=1, runs_total=1, trend="insufficient data")
+    text = _explain(sp, total_runs=1)
+    assert "Appeared in" not in text
+
+
+def test_explain_flags_new_pattern():
+    sp = _make_scored(runs_seen_in=2, runs_total=6, trend="new")
+    text = _explain(sp, total_runs=6)
+    assert "newly-emerging" in text or "new" in text.lower()
 
 
 # ---------------------------------------------------------------------------

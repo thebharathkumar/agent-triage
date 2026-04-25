@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from statistics import median
 
@@ -31,6 +32,15 @@ TAIL_RISK_WINDOW = 10
 # Below this, confidence scales linearly, so small samples are visibly low.
 CONFIDENCE_THRESHOLD = 5
 
+# Relative change thresholds for trend classification. second-half-rate vs
+# first-half-rate ratios outside [1 - band, 1 + band] flip to decreasing /
+# increasing; inside, the pattern is "stable".
+TREND_BAND = 0.3
+
+# Minimum number of runs required to emit a directional trend. Below this
+# threshold we report "insufficient data" instead of guessing.
+TREND_MIN_RUNS = 3
+
 
 @dataclass
 class ScoredPattern:
@@ -42,6 +52,9 @@ class ScoredPattern:
     confidence: float
     median_recovery_latency: float | None
     unrecovered_tail_count: int
+    runs_seen_in: int
+    runs_total: int
+    trend: str
 
     @property
     def confidence_label(self) -> str:
@@ -50,6 +63,12 @@ class ScoredPattern:
         if self.confidence >= 0.4:
             return "medium"
         return "low"
+
+    @property
+    def run_coverage(self) -> float:
+        if self.runs_total == 0:
+            return 0.0
+        return self.runs_seen_in / self.runs_total
 
 
 AgentTimeline = dict[tuple[str, str], list[tuple[int, bool]]]
@@ -121,6 +140,62 @@ def _compute_recovery_stats(
     )
 
 
+def _ordered_run_ids(all_events: list[TraceEvent]) -> list[str]:
+    """Runs ordered by the turn-0 event that appears first in the input.
+
+    We deliberately preserve input order rather than sorting
+    lexicographically: the input is a batch of ndjson files that was
+    presented to the CLI in some order, and that order is the closest
+    proxy to chronology we have without a timestamp field we trust.
+    """
+    seen: list[str] = []
+    seen_set: set[str] = set()
+    for ev in all_events:
+        if ev.run_id in seen_set:
+            continue
+        seen.append(ev.run_id)
+        seen_set.add(ev.run_id)
+    return seen
+
+
+def _compute_trend(
+    pattern: IncidentPattern, ordered_runs: list[str]
+) -> str:
+    """Classify the recurrence trend across runs.
+
+    Split the ordered run list into halves, compute per-run occurrence
+    rate in each half, and compare. Returns one of: "insufficient data",
+    "new", "resolved", "increasing", "decreasing", "stable".
+    """
+    if len(ordered_runs) < TREND_MIN_RUNS:
+        return "insufficient data"
+
+    midpoint = len(ordered_runs) // 2
+    first_runs = set(ordered_runs[:midpoint])
+    second_runs = set(ordered_runs[midpoint:])
+
+    run_counts: Counter[str] = Counter(ev.run_id for ev in pattern.events)
+    first_total = sum(run_counts[r] for r in first_runs)
+    second_total = sum(run_counts[r] for r in second_runs)
+
+    first_rate = first_total / len(first_runs) if first_runs else 0.0
+    second_rate = second_total / len(second_runs) if second_runs else 0.0
+
+    if first_rate == 0 and second_rate > 0:
+        return "new"
+    if first_rate > 0 and second_rate == 0:
+        return "resolved"
+    if first_rate == 0 and second_rate == 0:
+        return "stable"
+
+    ratio = second_rate / first_rate
+    if ratio >= 1 + TREND_BAND:
+        return "increasing"
+    if ratio <= 1 - TREND_BAND:
+        return "decreasing"
+    return "stable"
+
+
 def _compute_confidence(frequency: int) -> float:
     """Linearly scale confidence from 0 to 1 as occurrences approach threshold.
 
@@ -138,6 +213,7 @@ def score_patterns(
     """Score each incident pattern and return a sorted list (highest first)."""
     scored: list[ScoredPattern] = []
     timeline = _build_agent_timeline(all_events)
+    ordered_runs = _ordered_run_ids(all_events)
 
     # Frequency normalization denominator: avoid div-by-zero
     max_freq = max((p.frequency for p in patterns), default=1)
@@ -174,6 +250,9 @@ def score_patterns(
                 confidence=_compute_confidence(pattern.frequency),
                 median_recovery_latency=recovery.median_latency,
                 unrecovered_tail_count=recovery.unrecovered_tail_count,
+                runs_seen_in=len(pattern.run_ids),
+                runs_total=total_runs,
+                trend=_compute_trend(pattern, ordered_runs),
             )
         )
 

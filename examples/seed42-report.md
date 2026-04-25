@@ -1,6 +1,6 @@
 # Triage Report
 
-Generated: 2026-04-25 03:02 UTC
+Generated: 2026-04-25 03:08 UTC
 
 **1 run(s) analyzed. 6 incident pattern(s) detected. Top 3 worth your attention this morning.**
 
@@ -16,6 +16,8 @@ Sources: `runs/phase4/events_seed42.ndjson`
 |--------|-------|
 | Severity Score | 10.50 / 15.00 |
 | Frequency | 4 event(s) across 1 run(s) |
+| Appeared in | 1/1 runs |
+| Trend | insufficient data |
 | Recovery Rate | [----------] 0% |
 | Recovery Latency | no recoveries observed |
 | Tail Risk | 4 failures unrecovered after 10 turns |
@@ -38,6 +40,8 @@ Agent B hit a **Agent Error** on `move` 4 time(s) across 1 run. None of these fa
 |--------|-------|
 | Severity Score | 10.50 / 15.00 |
 | Frequency | 3 event(s) across 1 run(s) |
+| Appeared in | 1/1 runs |
+| Trend | insufficient data |
 | Recovery Rate | [----------] 0% |
 | Recovery Latency | no recoveries observed |
 | Tail Risk | 3 failures unrecovered after 10 turns |
@@ -60,6 +64,8 @@ Agent A hit a **Agent Error** on `move` 3 time(s) across 1 run. None of these fa
 |--------|-------|
 | Severity Score | 10.00 / 15.00 |
 | Frequency | 1 event(s) across 1 run(s) |
+| Appeared in | 1/1 runs |
+| Trend | insufficient data |
 | Recovery Rate | [##########] 100% |
 | Recovery Latency | median recovery latency: 1 turn |
 | Tail Risk | no tail risk |

@@ -100,6 +100,14 @@ class TestBuildReport:
         report = self._make_report()
         assert "Tail Risk" in report
 
+    def test_report_contains_appeared_in_row(self):
+        report = self._make_report()
+        assert "Appeared in" in report
+
+    def test_report_contains_trend_row(self):
+        report = self._make_report()
+        assert "Trend" in report
+
     def test_empty_scored_shows_no_incidents_message(self):
         report = build_report(
             scored=[],

@@ -230,3 +230,106 @@ class TestRecoveryDynamics:
         )
         scored = score_patterns(patterns, events, 1)[0]
         assert scored.unrecovered_tail_count == 0
+
+
+class TestRecurrence:
+    def _events_across_runs(
+        self, run_counts: dict[str, int], classification: str = "agent_error"
+    ):
+        """Build failing events keyed by {run_id: failure_count}."""
+        events = []
+        idx = 0
+        for run_id, count in run_counts.items():
+            for i in range(count):
+                events.append(
+                    make_event(
+                        event_id=f"e{idx}",
+                        run_id=run_id,
+                        turn=i,
+                        agent_id="A",
+                        action_succeeded=False,
+                        failure_classification=classification,
+                    )
+                )
+                idx += 1
+        return events
+
+    def test_runs_seen_in_counts_unique_runs(self):
+        events = self._events_across_runs({"r1": 2, "r2": 1, "r3": 3})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=3)[0]
+        assert scored.runs_seen_in == 3
+        assert scored.runs_total == 3
+
+    def test_run_coverage_ratio(self):
+        events = self._events_across_runs({"r1": 1, "r2": 1})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.runs_seen_in == 2
+        assert scored.runs_total == 4
+        assert scored.run_coverage == 0.5
+
+    def test_trend_insufficient_data_below_threshold(self):
+        events = self._events_across_runs({"r1": 2, "r2": 2})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=2)[0]
+        assert scored.trend == "insufficient data"
+
+    def test_trend_stable_when_rate_unchanged(self):
+        events = self._events_across_runs({"r1": 2, "r2": 2, "r3": 2, "r4": 2})
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "stable"
+
+    def test_trend_increasing_when_second_half_rises(self):
+        # First half (r1, r2) = 1 each; second half (r3, r4) = 5 each.
+        events = self._events_across_runs(
+            {"r1": 1, "r2": 1, "r3": 5, "r4": 5}
+        )
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "increasing"
+
+    def test_trend_decreasing_when_second_half_drops(self):
+        events = self._events_across_runs(
+            {"r1": 5, "r2": 5, "r3": 1, "r4": 1}
+        )
+        patterns = group_events(events)
+        scored = score_patterns(patterns, events, total_runs=4)[0]
+        assert scored.trend == "decreasing"
+
+    def test_trend_new_when_absent_in_first_half(self):
+        # Pattern only shows up in second half. Add filler events in early
+        # runs so the run ordering is visible.
+        filler = [
+            make_event(
+                event_id="ok-1", run_id="r1", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+            make_event(
+                event_id="ok-2", run_id="r2", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+        ]
+        events = filler + self._events_across_runs({"r3": 3, "r4": 3})
+        patterns = group_events(events)
+        scored = [s for s in score_patterns(patterns, events, total_runs=4)
+                  if s.pattern.agent_id == "A"][0]
+        assert scored.trend == "new"
+
+    def test_trend_resolved_when_absent_in_second_half(self):
+        filler = [
+            make_event(
+                event_id="ok-1", run_id="r3", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+            make_event(
+                event_id="ok-2", run_id="r4", turn=0, agent_id="Z",
+                action_succeeded=True,
+            ),
+        ]
+        events = self._events_across_runs({"r1": 3, "r2": 3}) + filler
+        patterns = group_events(events)
+        scored = [s for s in score_patterns(patterns, events, total_runs=4)
+                  if s.pattern.agent_id == "A"][0]
+        assert scored.trend == "resolved"

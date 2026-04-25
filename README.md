@@ -145,6 +145,33 @@ two dynamics signals:
   10 turns. This is the "stuck for good" signal, distinct from "slow to
   recover".
 
+### Cross-run recurrence
+
+A pattern that hits once in a single run is noise. A pattern that hits in
+every run is architectural. Each scored pattern exposes two recurrence
+signals:
+
+- **Appeared in X/Y runs** — how many of the analyzed runs contained this
+  pattern at least once. A coordination failure appearing in 11/12 runs is
+  a different animal from one that spikes in a single run.
+- **Trend** — the runs, in input order, are split into a first and
+  second half and the per-run occurrence rate is compared. The pattern is
+  labelled one of:
+
+  | Label | Meaning |
+  |-------|---------|
+  | `new` | absent in the first half, present in the second — emerging |
+  | `increasing` | second-half rate ≥ 1.3× first-half rate |
+  | `stable` | second-half rate within ±30% of first-half rate |
+  | `decreasing` | second-half rate ≤ 0.7× first-half rate |
+  | `resolved` | present in the first half, absent in the second |
+  | `insufficient data` | fewer than 3 runs — no trend emitted |
+
+  Trend treats input order as a chronology proxy. If you pass files in a
+  deterministic chronological order (e.g. `runs/*.ndjson` sorted by
+  filename timestamp), the signal is meaningful; if you shuffle them, it
+  is not.
+
 ---
 
 ## When triage is *not* the right tool
