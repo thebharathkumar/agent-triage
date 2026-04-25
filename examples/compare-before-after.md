@@ -1,6 +1,6 @@
 # Triage Comparison Report
 
-Generated: 2026-04-25 03:53 UTC
+Generated: 2026-04-25 04:01 UTC
 
 **Before:** `runs/examples/before.ndjson` (3 run(s), 30 event(s))
 **After:** `runs/examples/monday.ndjson` (3 run(s), 28 event(s))
@@ -9,12 +9,12 @@ Generated: 2026-04-25 03:53 UTC
 
 ## Headline
 
-- Agent Error: new (0 → 2)
-- Agent Error unrecovered: new (0 → 2)
+- Agent Error: new (tentative) (0 → 2)
+- Agent Error unrecovered: new (tentative) (0 → 2)
 - Coordination Failure: down 39% (18 → 11)
 - Coordination Failure unrecovered: down 39% (18 → 11)
-- Environment Constraint: resolved (3 → 0)
-- Environment Constraint unrecovered: resolved (3 → 0)
+- Environment Constraint: resolved (tentative) (3 → 0)
+- Environment Constraint unrecovered: resolved (tentative) (3 → 0)
 - new pattern: [executor] call_external_api / agent_error / no-divergence
 - resolved: [navigator] move / environment_constraint / no-divergence
 
@@ -22,12 +22,12 @@ Generated: 2026-04-25 03:53 UTC
 
 ## Classification deltas
 
-| Classification | Before | After | Δ frequency | Unrecovered before | Unrecovered after | Δ unrecovered |
-|---|---|---|---|---|---|---|
-| Agent Error | 0 | 2 | new | 0 | 2 | new |
-| Coordination Failure | 18 | 11 | down 39% | 18 | 11 | down 39% |
-| Environment Constraint | 3 | 0 | resolved | 3 | 0 | resolved |
-| Information Lag | 6 | 6 | stable | 6 | 0 | resolved |
+| Classification | Before | After | Δ frequency | Unrecovered before | Unrecovered after | Δ unrecovered | Δ recovery latency |
+|---|---|---|---|---|---|---|---|
+| Agent Error | 0 | 2 | new (tentative) | 0 | 2 | new (tentative) | n/a |
+| Coordination Failure | 18 | 11 | down 39% | 18 | 11 | down 39% | n/a |
+| Environment Constraint | 3 | 0 | resolved (tentative) | 3 | 0 | resolved (tentative) | n/a |
+| Information Lag | 6 | 6 | stable | 6 | 0 | resolved | new (2 turns) |
 
 ---
 

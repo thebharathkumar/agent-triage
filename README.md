@@ -53,9 +53,31 @@ model versions.
 triage compare runs/before.ndjson runs/after.ndjson
 ```
 
-Output reports per-classification frequency and unrecovered-count
-deltas, plus the set diff of pattern IDs (new in `after`, resolved
-since `before`, and persisting). See
+Each argument can be a single `.ndjson` file or a directory; passing a
+directory loads every `.ndjson` in it (non-recursive), so the command
+is symmetric across CI shapes:
+
+```bash
+triage compare runs/before/ runs/after/
+```
+
+**Produces:**
+
+- incident **frequency deltas** per classification (`down 39%`, `new`,
+  `resolved`, `stable`, etc.)
+- **recovery latency changes** — median turns-to-first-success for
+  each classification, before vs after
+- **unrecovered-count changes** — number of failures that did not
+  recover within the window
+- **newly emerging patterns** — agent / tool / classification /
+  divergence-fields signatures present only in `after`
+- **resolved patterns** — signatures present only in `before`
+- **persisting patterns** — signatures present in both, with their
+  before/after counts
+
+Changes based on small samples (fewer than 5 occurrences on the larger
+side) are tagged `(tentative)` so a thin-evidence delta is not read as
+a verified one. See
 [examples/compare-before-after.md](examples/compare-before-after.md)
 for a real comparison.
 

@@ -117,11 +117,10 @@ class TestCompare:
         assert agent_error.frequency_change == "down 50%"
 
     def test_unrecovered_count_decreases_when_recovery_added(self):
-        # before: 4 failures, none recover -> 4 unrecovered
-        before = _failures(classification="agent_error", count=4)
-        # after: same 4 failures, plus a successful action one turn after
-        # each so every failure recovers within the window.
-        failures = _failures(classification="agent_error", count=4)
+        # Use 5 failures (== CONFIDENCE_THRESHOLD) so the change label is
+        # not flagged "tentative".
+        before = _failures(classification="agent_error", count=5)
+        failures = _failures(classification="agent_error", count=5)
         recoveries = [
             make_event(
                 event_id=f"ok-{i}",
@@ -140,9 +139,32 @@ class TestCompare:
         agent_error = next(
             d for d in report.deltas if d.classification == "agent_error"
         )
-        assert agent_error.before_unrecovered == 4
+        assert agent_error.before_unrecovered == 5
         assert agent_error.after_unrecovered == 0
         assert agent_error.unrecovered_change == "resolved"
+
+    def test_patterns_distinguished_by_divergence_fields(self):
+        # Two patterns with identical (agent, tool, classification) but
+        # different divergence_fields must NOT collide on pattern_id, or
+        # compare-mode would mis-classify them as a single persisting
+        # pattern.
+        before = _failures(
+            classification="coordination_failure",
+            count=2,
+            divergence_fields=["other_position"],
+        )
+        after = _failures(
+            classification="coordination_failure",
+            count=2,
+            divergence_fields=["task_queue_head"],
+        )
+        report = compare_event_batches(before, after)
+        assert len(report.new_patterns) == 1
+        assert len(report.resolved_patterns) == 1
+        assert (
+            report.new_patterns[0].pattern.divergence_fields
+            != report.resolved_patterns[0].pattern.divergence_fields
+        )
 
     def test_event_and_run_counts(self):
         before = _failures(classification="agent_error", count=3, run_id="rA")
@@ -264,3 +286,100 @@ def test_cli_compare_missing_arg_fails(tmp_path: Path):
     runner = CliRunner()
     result = runner.invoke(main, ["compare", str(before)])
     assert result.exit_code != 0
+
+
+def test_cli_compare_accepts_directories(tmp_path: Path):
+    before_dir = tmp_path / "before"
+    before_dir.mkdir()
+    after_dir = tmp_path / "after"
+    after_dir.mkdir()
+    _write_ndjson(before_dir / "a.ndjson", [dict(MINIMAL_FAILURE, run_id="b1")])
+    _write_ndjson(before_dir / "b.ndjson", [dict(MINIMAL_FAILURE, run_id="b2", event_id="b-2")])
+    _write_ndjson(after_dir / "a.ndjson", [dict(MINIMAL_FAILURE, run_id="a1", event_id="a-1")])
+    runner = CliRunner()
+    result = runner.invoke(main, ["compare", str(before_dir), str(after_dir)])
+    assert result.exit_code == 0, result.output
+    assert "Triage Comparison Report" in result.output
+    # The label should annotate the directory with the file count.
+    assert "2 file" in result.output
+
+
+def test_cli_compare_empty_directory_fails(tmp_path: Path):
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    after = tmp_path / "after.ndjson"
+    _write_ndjson(after, [dict(MINIMAL_FAILURE)])
+    runner = CliRunner()
+    result = runner.invoke(main, ["compare", str(empty_dir), str(after)])
+    assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# Confidence-aware deltas and recovery latency change
+# ---------------------------------------------------------------------------
+
+
+class TestTentativeAndLatency:
+    def test_tentative_marker_below_threshold(self):
+        before = _failures(classification="agent_error", count=1)
+        after = _failures(classification="agent_error", count=2)
+        report = compare_event_batches(before, after)
+        d = next(d for d in report.deltas if d.classification == "agent_error")
+        assert d.is_tentative
+        assert "tentative" in d.frequency_change
+
+    def test_no_tentative_marker_above_threshold(self):
+        # CONFIDENCE_THRESHOLD is 5; both sides at or above it.
+        before = _failures(classification="agent_error", count=8)
+        after = _failures(classification="agent_error", count=6)
+        report = compare_event_batches(before, after)
+        d = next(d for d in report.deltas if d.classification == "agent_error")
+        assert not d.is_tentative
+        assert "tentative" not in d.frequency_change
+
+    def test_latency_change_new_when_only_after_recovers(self):
+        before = _failures(classification="agent_error", count=2)
+        # after has same failures plus a recovery one turn later
+        failures = _failures(classification="agent_error", count=2)
+        recoveries = [
+            make_event(
+                event_id=f"ok-{i}",
+                run_id=ev.run_id,
+                turn=ev.turn + 1,
+                agent_id=ev.agent_id,
+                tool_name=ev.action_taken.tool_name,
+                action_succeeded=True,
+            )
+            for i, ev in enumerate(failures)
+        ]
+        after = failures + recoveries
+        report = compare_event_batches(before, after)
+        d = next(d for d in report.deltas if d.classification == "agent_error")
+        assert d.before_median_latency is None
+        assert d.after_median_latency == 1.0
+        assert "new" in d.latency_change
+
+    def test_latency_change_stable_when_unchanged(self):
+        # Same recovery dynamics in both batches.
+        def with_recovery(run_id: str, count: int):
+            failures = _failures(
+                classification="agent_error", count=count, run_id=run_id
+            )
+            recoveries = [
+                make_event(
+                    event_id=f"ok-{run_id}-{i}",
+                    run_id=run_id,
+                    turn=ev.turn + 1,
+                    agent_id=ev.agent_id,
+                    tool_name=ev.action_taken.tool_name,
+                    action_succeeded=True,
+                )
+                for i, ev in enumerate(failures)
+            ]
+            return failures + recoveries
+
+        before = with_recovery("r1", 3)
+        after = with_recovery("r2", 3)
+        report = compare_event_batches(before, after)
+        d = next(d for d in report.deltas if d.classification == "agent_error")
+        assert d.latency_change.startswith("stable")
