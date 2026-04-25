@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import math
 
-from triage.scorer import RECOVERY_WINDOW, ScoredPattern
+from triage.scorer import RECOVERY_WINDOW, TAIL_RISK_WINDOW, ScoredPattern
 
 # Human-readable descriptions for each failure classification
 CLASSIFICATION_LABELS: dict[str, str] = {
@@ -64,6 +64,25 @@ def _recovery_bar(rate: float) -> str:
     return f"[{bar}] {_fmt_pct(clamped)}"
 
 
+def _format_latency(sp: ScoredPattern) -> str:
+    """Human-readable recovery dynamics summary."""
+    if sp.median_recovery_latency is None:
+        return "no recoveries observed"
+    latency = sp.median_recovery_latency
+    turn_word = "turn" if latency == 1 else "turns"
+    return f"median recovery latency: {latency:g} {turn_word}"
+
+
+def _format_tail_risk(sp: ScoredPattern) -> str:
+    if sp.unrecovered_tail_count == 0:
+        return "no tail risk"
+    run_word = "failure" if sp.unrecovered_tail_count == 1 else "failures"
+    return (
+        f"{sp.unrecovered_tail_count} {run_word} unrecovered after "
+        f"{TAIL_RISK_WINDOW} turns"
+    )
+
+
 def _explain(sp: ScoredPattern, total_runs: int) -> str:
     p = sp.pattern
     label = CLASSIFICATION_LABELS.get(p.failure_classification, p.failure_classification)
@@ -77,10 +96,26 @@ def _explain(sp: ScoredPattern, total_runs: int) -> str:
             f"within {RECOVERY_WINDOW} turns, meaning the agent got stuck rather than adapting."
         )
     else:
+        latency_phrase = ""
+        if sp.median_recovery_latency is not None:
+            latency = sp.median_recovery_latency
+            latency_turn_word = "turn" if latency == 1 else "turns"
+            latency_phrase = (
+                f" (median latency {latency:g} {latency_turn_word})"
+            )
         recovery_note = (
             f"About {_fmt_pct(sp.recovery_rate)} of occurrences were followed by a "
-            f"successful action within {RECOVERY_WINDOW} turns, suggesting partial self-correction."
+            f"successful action within {RECOVERY_WINDOW} turns{latency_phrase}, "
+            "suggesting partial self-correction."
         )
+        if sp.unrecovered_tail_count > 0:
+            tail_word = (
+                "failure" if sp.unrecovered_tail_count == 1 else "failures"
+            )
+            recovery_note += (
+                f" However, {sp.unrecovered_tail_count} {tail_word} remained "
+                f"unrecovered after {TAIL_RISK_WINDOW} turns — a tail-risk signal."
+            )
 
     div_note = ""
     if p.divergence_fields:
@@ -149,6 +184,12 @@ def build_report(
         lines.append(f"| Severity Score | {sp.severity_score:.2f} / 15.00 |")
         lines.append(f"| Frequency | {p.frequency} event(s) across {len(p.run_ids)} run(s) |")
         lines.append(f"| Recovery Rate | {_recovery_bar(sp.recovery_rate)} |")
+        lines.append(f"| Recovery Latency | {_format_latency(sp)} |")
+        lines.append(f"| Tail Risk | {_format_tail_risk(sp)} |")
+        lines.append(
+            f"| Confidence | {sp.confidence_label} ({p.frequency} occurrence"
+            f"{'s' if p.frequency != 1 else ''}) |"
+        )
         lines.append(f"| Final Score | **{sp.final_score:.2f}** |")
         lines.append("")
         lines.append("**Why this matters:**")

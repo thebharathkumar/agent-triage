@@ -6,7 +6,9 @@ from tests.conftest import make_event
 from triage.grouper import group_events
 from triage.scorer import (
     CLASSIFICATION_WEIGHTS,
+    CONFIDENCE_THRESHOLD,
     NO_RECOVERY_MULTIPLIER,
+    TAIL_RISK_WINDOW,
     score_patterns,
 )
 
@@ -152,3 +154,79 @@ class TestScorePatterns:
         # With only one pattern, it should get frequency_score = 10.0
         scored = score_patterns(patterns, events, 1)
         assert abs(scored[0].frequency_score - 10.0) < 0.01
+
+
+class TestConfidence:
+    def test_confidence_scales_with_frequency(self):
+        low_patterns, low_events = _build_pattern_and_events(
+            classification="agent_error", count=1
+        )
+        high_patterns, high_events = _build_pattern_and_events(
+            classification="agent_error", count=CONFIDENCE_THRESHOLD,
+        )
+        low_scored = score_patterns(low_patterns, low_events, 1)[0]
+        high_scored = score_patterns(high_patterns, high_events, 1)[0]
+        assert low_scored.confidence < high_scored.confidence
+        assert high_scored.confidence == 1.0
+
+    def test_confidence_caps_at_one(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=CONFIDENCE_THRESHOLD * 4,
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence == 1.0
+
+    def test_confidence_label_low_for_single_occurrence(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=1
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence_label == "low"
+
+    def test_confidence_label_high_at_threshold(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=CONFIDENCE_THRESHOLD,
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.confidence_label == "high"
+
+
+class TestRecoveryDynamics:
+    def test_median_latency_is_none_when_no_recoveries(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error", count=2
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.median_recovery_latency is None
+
+    def test_median_latency_reports_turns_to_first_success(self):
+        # Failure at 0 recovers at turn 2; failure at 4 recovers at turn 5.
+        # Latencies: [2, 1] -> median 1.5
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=2,
+            recovery_turns=[2, 5],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.median_recovery_latency == 1.5
+
+    def test_tail_risk_counts_failures_unrecovered_beyond_window(self):
+        # Single failure at turn 0, success only at turn TAIL_RISK_WINDOW + 5
+        # -> still counted as tail-unrecovered.
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=1,
+            recovery_turns=[TAIL_RISK_WINDOW + 5],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.unrecovered_tail_count == 1
+
+    def test_tail_risk_zero_when_fast_recovery(self):
+        patterns, events = _build_pattern_and_events(
+            classification="agent_error",
+            count=1,
+            recovery_turns=[1],
+        )
+        scored = score_patterns(patterns, events, 1)[0]
+        assert scored.unrecovered_tail_count == 0

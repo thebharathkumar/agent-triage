@@ -88,6 +88,18 @@ class TestBuildReport:
         report = self._make_report()
         assert "Suggested next action" in report
 
+    def test_report_contains_confidence_row(self):
+        report = self._make_report()
+        assert "Confidence" in report
+
+    def test_report_contains_recovery_latency_row(self):
+        report = self._make_report()
+        assert "Recovery Latency" in report
+
+    def test_report_contains_tail_risk_row(self):
+        report = self._make_report()
+        assert "Tail Risk" in report
+
     def test_empty_scored_shows_no_incidents_message(self):
         report = build_report(
             scored=[],
