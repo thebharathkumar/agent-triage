@@ -1,9 +1,22 @@
 # Triage Comparison Report
 
-Generated: 2026-04-25 04:01 UTC
+Generated: 2026-04-25 08:38 UTC
 
 **Before:** `runs/examples/before.ndjson` (3 run(s), 30 event(s))
 **After:** `runs/examples/monday.ndjson` (3 run(s), 28 event(s))
+
+---
+
+## Score Summary
+
+| Metric | Before | After | Δ |
+|---|---|---|---|
+| Distinct incident patterns | 3 | 3 | stable |
+| Failure events | 27 | 19 | down 30% |
+| Unrecovered events | 27 | 13 | down 52% |
+| Coordination failure events | 18 | 11 | down 39% |
+| Top final score | 13.00 | 13.00 | stable |
+| Mean final score | 7.10 | 8.40 | +1.30 |
 
 ---
 

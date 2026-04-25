@@ -263,6 +263,48 @@ def build_comparison_report(
     lines.append("---")
     lines.append("")
 
+    if comparison.before_summary is not None and comparison.after_summary is not None:
+        from triage.comparer import _pct_change as _pct_change_fn
+
+        b = comparison.before_summary
+        a = comparison.after_summary
+        lines.append("## Score Summary")
+        lines.append("")
+        lines.append("| Metric | Before | After | Δ |")
+        lines.append("|---|---|---|---|")
+        lines.append(
+            f"| Distinct incident patterns | {b.pattern_count} | "
+            f"{a.pattern_count} | {_pct_change_fn(b.pattern_count, a.pattern_count)} |"
+        )
+        lines.append(
+            f"| Failure events | {b.failure_event_count} | "
+            f"{a.failure_event_count} | "
+            f"{_pct_change_fn(b.failure_event_count, a.failure_event_count)} |"
+        )
+        lines.append(
+            f"| Unrecovered events | {b.unrecovered_event_count} | "
+            f"{a.unrecovered_event_count} | "
+            f"{_pct_change_fn(b.unrecovered_event_count, a.unrecovered_event_count)} |"
+        )
+        lines.append(
+            f"| Coordination failure events | {b.coordination_failure_count} | "
+            f"{a.coordination_failure_count} | "
+            f"{_pct_change_fn(b.coordination_failure_count, a.coordination_failure_count)} |"
+        )
+        lines.append(
+            f"| Top final score | {b.top_final_score:.2f} | "
+            f"{a.top_final_score:.2f} | "
+            f"{_score_delta(b.top_final_score, a.top_final_score)} |"
+        )
+        lines.append(
+            f"| Mean final score | {b.mean_final_score:.2f} | "
+            f"{a.mean_final_score:.2f} | "
+            f"{_score_delta(b.mean_final_score, a.mean_final_score)} |"
+        )
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
     lines.append("## Headline")
     lines.append("")
     headline_lines = _comparison_headlines(comparison)
@@ -345,6 +387,15 @@ def build_comparison_report(
             )
     lines.append("")
     return "\n".join(lines)
+
+
+def _score_delta(before: float, after: float) -> str:
+    """Render a float-score change as 'down N.NN', 'up N.NN', or 'stable'."""
+    delta = after - before
+    if abs(delta) < 0.005:
+        return "stable"
+    sign = "+" if delta > 0 else "-"
+    return f"{sign}{abs(delta):.2f}"
 
 
 def _comparison_headlines(comparison: ComparisonReport) -> list[str]:

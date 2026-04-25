@@ -10,7 +10,7 @@ When multi-agent systems run at scale, they generate thousands of trace events p
 
 The signal you actually need at 9 AM is not "here are 847 events from last night." It is: "here are the three failure patterns that matter, ranked by how bad they are and whether the agents recovered."
 
-`triage` is that tool. It reads agent trace data in NDJSON format, clusters events into incident patterns, scores each pattern across three dimensions (frequency, severity, recovery), and prints a ranked short list with plain-English explanations and a suggested next action for each.
+`triage` is that tool. It reads agent trace data (NDJSON natively, OpenTelemetry spans via the built-in adapter, and any custom format you can plug in), clusters events into incident patterns, scores each pattern across three dimensions (frequency, severity, recovery), and prints a ranked short list with plain-English explanations and a suggested next action for each. It also has a `compare` mode for diffing two batches.
 
 ---
 
@@ -63,6 +63,10 @@ triage compare runs/before/ runs/after/
 
 **Produces:**
 
+- a **Score Summary** panel — pattern count, total failure events,
+  unrecovered events, coordination-failure events, top final score,
+  and mean final score, with deltas, so the "did things get better
+  overall" question is answered before any drill-down
 - incident **frequency deltas** per classification (`down 39%`, `new`,
   `resolved`, `stable`, etc.)
 - **recovery latency changes** — median turns-to-first-success for
@@ -88,6 +92,43 @@ triage --help
 triage report --help
 triage compare --help
 ```
+
+---
+
+## Trace formats and adapters
+
+`triage` is plugin-shaped on the input side. Two adapters ship in the
+box:
+
+| Adapter   | Extensions          | Notes |
+|-----------|---------------------|-------|
+| `ndjson`  | `.ndjson`, `.jsonl` | One TraceEvent per line. The native schema documented below. |
+| `otel`    | `.json`             | Minimal OpenTelemetry-spans adapter; maps `span.name` → `tool_name`, `status.code` → `action_succeeded`, `attributes["agent.id"]` → `agent_id`, `attributes["failure_classification"]` → `failure_classification`, `attributes["divergence_fields"]` → `divergence_fields`. |
+
+The format is auto-detected by extension and can be overridden:
+
+```bash
+triage report --format otel spans.json
+triage compare --format ndjson before.weird after.weird
+```
+
+### Adding your own adapter
+
+The `TraceAdapter` protocol in `src/triage/adapters.py` is intentionally
+small:
+
+```python
+class TraceAdapter(Protocol):
+    name: ClassVar[str]
+    extensions: ClassVar[tuple[str, ...]]
+    def load(self, path: Path) -> tuple[list[TraceEvent], list[str]]:
+        ...
+```
+
+Any class that satisfies it can be added to `ADAPTERS` (or registered
+externally) and immediately works in both `report` and `compare`. The
+adapter only owns parsing — scoring, grouping, comparison, and
+reporting are agnostic to the source format.
 
 ---
 
@@ -196,9 +237,12 @@ signals:
 - **Appeared in X/Y runs** — how many of the analyzed runs contained this
   pattern at least once. A coordination failure appearing in 11/12 runs is
   a different animal from one that spikes in a single run.
-- **Trend** — the runs, in input order, are split into a first and
-  second half and the per-run occurrence rate is compared. The pattern is
-  labelled one of:
+- **Trend** — when the input has at least 6 runs (`2 ×
+  TREND_WINDOW_SIZE`), the most recent 3 runs are compared against the
+  3 runs immediately preceding them as a sliding window. Below 6 runs,
+  the function falls back to a split-half partition so the label is
+  still directional rather than always `insufficient data`. The
+  pattern is labelled one of:
 
   | Label | Meaning |
   |-------|---------|
@@ -209,10 +253,13 @@ signals:
   | `resolved` | present in the first half, absent in the second |
   | `insufficient data` | fewer than 3 runs — no trend emitted |
 
-  Trend treats input order as a chronology proxy. If you pass files in a
-  deterministic chronological order (e.g. `runs/*.ndjson` sorted by
-  filename timestamp), the signal is meaningful; if you shuffle them, it
-  is not.
+  Trend treats input order as a chronology proxy. If you pass files in
+  a deterministic chronological order (e.g. `runs/*.ndjson` sorted by
+  filename timestamp), the signal is meaningful; if you shuffle them,
+  it is not. Sliding-window detection is more sensitive to recent
+  changes than split-half: a regression that hits in the last few runs
+  but was absent before will show as `increasing` or `new` rather than
+  being averaged out by older history.
 
 Recurrence is reported separately from severity to distinguish persistent
 low-impact issues from rare catastrophic failures. Fusing it into the
@@ -318,8 +365,13 @@ Three reports are checked in:
 - [examples/compare-before-after.md](examples/compare-before-after.md) —
   a `triage compare` regression report between
   `runs/examples/before.ndjson` and `runs/examples/monday.ndjson`,
-  showing classification deltas, a newly-emerging tool error, and a
-  resolved environment-constraint pattern.
+  showing the score-summary panel, classification deltas, a
+  newly-emerging tool error, and a resolved environment-constraint
+  pattern.
+- [examples/otel-report.md](examples/otel-report.md) — same `triage
+  report` invocation, but reading from `runs/examples/otel.json` (a
+  small OpenTelemetry-spans file) to demonstrate that the adapter
+  layer feeds the same scoring pipeline regardless of source format.
 
 ---
 
@@ -336,10 +388,11 @@ pytest --cov=src/triage --cov-report=term-missing
 ```
 src/triage/
   cli.py        Entry point — Click group with `report` and `compare` subcommands
-  loader.py     NDJSON parsing and Pydantic schema validation
+  adapters.py   Pluggable trace-format adapters (NDJSON, OTel) + TraceAdapter protocol
+  loader.py     TraceEvent schema + format-dispatching load_files
   grouper.py    Incident pattern detection and clustering
-  scorer.py     Severity scoring model
-  comparer.py   Before/after diff: classification deltas + pattern set diff
+  scorer.py     Severity scoring + sliding-window trend detection
+  comparer.py   Before/after diff: deltas, pattern set diff, score summary
   reporter.py   Markdown report generation (per-batch and comparison)
 
 tests/
@@ -348,6 +401,7 @@ tests/
   test_grouper.py   Grouper unit tests
   test_scorer.py    Scorer unit tests
   test_comparer.py  Comparer unit tests
+  test_adapters.py  Adapter protocol and built-in NDJSON / OTel tests
 
 runs/phase4/        Sample trace files
 runs/examples/      Synthetic traces driving the example reports

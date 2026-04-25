@@ -7,11 +7,14 @@ from pathlib import Path
 
 import click
 
+from triage.adapters import ADAPTERS
 from triage.comparer import compare_event_batches
 from triage.grouper import group_events
 from triage.loader import load_files
 from triage.reporter import build_comparison_report, build_report
 from triage.scorer import score_patterns
+
+_FORMAT_CHOICES = sorted(ADAPTERS.keys())
 
 
 @click.group()
@@ -41,7 +44,22 @@ def main() -> None:
     show_default=True,
     help="Number of top incidents to include in the report.",
 )
-def report(files: tuple[Path, ...], output: Path | None, top: int) -> None:
+@click.option(
+    "--format",
+    "format_",
+    type=click.Choice(_FORMAT_CHOICES),
+    default=None,
+    help=(
+        "Trace format. Auto-detected from file extension when omitted: "
+        ".ndjson/.jsonl -> ndjson, .json -> otel."
+    ),
+)
+def report(
+    files: tuple[Path, ...],
+    output: Path | None,
+    top: int,
+    format_: str | None,
+) -> None:
     """Produce a ranked morning severity report from one or more trace files.
 
     Pass one or more NDJSON trace files as arguments. Glob expansion is
@@ -53,13 +71,13 @@ def report(files: tuple[Path, ...], output: Path | None, top: int) -> None:
     """
     if not files:
         click.echo(
-            "Error: provide at least one NDJSON file. "
+            "Error: provide at least one trace file. "
             "Example: triage report runs/phase4/events_seed42.ndjson",
             err=True,
         )
         sys.exit(1)
 
-    result = load_files(list(files))
+    result = load_files(list(files), format=format_)
 
     if result.parse_errors:
         for err in result.parse_errors:
@@ -96,7 +114,19 @@ def report(files: tuple[Path, ...], output: Path | None, top: int) -> None:
     default=None,
     help="Write comparison report to this file instead of stdout.",
 )
-def compare(before: Path, after: Path, output: Path | None) -> None:
+@click.option(
+    "--format",
+    "format_",
+    type=click.Choice(_FORMAT_CHOICES),
+    default=None,
+    help=(
+        "Trace format. Auto-detected from file extension when omitted: "
+        ".ndjson/.jsonl -> ndjson, .json -> otel."
+    ),
+)
+def compare(
+    before: Path, after: Path, output: Path | None, format_: str | None
+) -> None:
     """Diff two batches of trace events.
 
     Reports per-classification frequency, unrecovered-count, and
@@ -120,8 +150,8 @@ def compare(before: Path, after: Path, output: Path | None) -> None:
         )
         sys.exit(1)
 
-    before_result = load_files(before_files)
-    after_result = load_files(after_files)
+    before_result = load_files(before_files, format=format_)
+    after_result = load_files(after_files, format=format_)
 
     for err in before_result.parse_errors + after_result.parse_errors:
         click.echo(f"[parse error] {err}", err=True)
