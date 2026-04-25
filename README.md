@@ -172,6 +172,11 @@ signals:
   filename timestamp), the signal is meaningful; if you shuffle them, it
   is not.
 
+Recurrence is reported separately from severity to distinguish persistent
+low-impact issues from rare catastrophic failures. Fusing it into the
+final score would double-count frequency effects and hide the distinction
+an operator needs to triage the two differently.
+
 ---
 
 ## When triage is *not* the right tool
