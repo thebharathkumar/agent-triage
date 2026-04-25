@@ -413,3 +413,9 @@ examples/           Generated example reports
 ## Schema Source
 
 Trace format is compatible with [dungeon-traces](https://github.com/thebharathkumar/dungeon-traces) (`feature/viewer-enhanced` branch), a multi-agent simulation that produces NDJSON event logs for dungeon-navigation runs.
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 Bharath kumar R
