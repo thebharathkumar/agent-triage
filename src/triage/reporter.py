@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import datetime
 import math
+from typing import TYPE_CHECKING
 
 from triage.scorer import RECOVERY_WINDOW, TAIL_RISK_WINDOW, ScoredPattern
+
+if TYPE_CHECKING:
+    from triage.comparer import ComparisonReport
 
 # Human-readable descriptions for each failure classification
 CLASSIFICATION_LABELS: dict[str, str] = {
@@ -224,3 +228,144 @@ def build_report(
         lines.append("")
 
     return "\n".join(lines)
+
+
+def build_comparison_report(
+    comparison: ComparisonReport,
+    before_path: str,
+    after_path: str,
+) -> str:
+    """Render a before/after comparison as a markdown report.
+
+    The output answers a different question than build_report: not
+    "what should I look at this morning" but "did the change between
+    these two batches make agent behavior better or worse, and where".
+    """
+    now = datetime.datetime.now(tz=datetime.UTC)
+    date_str = now.strftime("%Y-%m-%d %H:%M UTC")
+
+    lines: list[str] = []
+    lines.append("# Triage Comparison Report")
+    lines.append("")
+    lines.append(f"Generated: {date_str}")
+    lines.append("")
+    lines.append(
+        f"**Before:** `{before_path}` "
+        f"({comparison.before_run_count} run(s), "
+        f"{comparison.before_event_count} event(s))"
+    )
+    lines.append(
+        f"**After:** `{after_path}` "
+        f"({comparison.after_run_count} run(s), "
+        f"{comparison.after_event_count} event(s))"
+    )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    lines.append("## Headline")
+    lines.append("")
+    headline_lines = _comparison_headlines(comparison)
+    if not headline_lines:
+        lines.append("No changes detected between the two batches.")
+    else:
+        for h in headline_lines:
+            lines.append(f"- {h}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    lines.append("## Classification deltas")
+    lines.append("")
+    lines.append(
+        "| Classification | Before | After | Δ frequency | "
+        "Unrecovered before | Unrecovered after | Δ unrecovered |"
+    )
+    lines.append("|---|---|---|---|---|---|---|")
+    for d in comparison.deltas:
+        label = CLASSIFICATION_LABELS.get(d.classification, d.classification)
+        lines.append(
+            f"| {label} | {d.before_frequency} | {d.after_frequency} | "
+            f"{d.frequency_change} | {d.before_unrecovered} | "
+            f"{d.after_unrecovered} | {d.unrecovered_change} |"
+        )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    lines.append("## New patterns (in `after` only)")
+    lines.append("")
+    if not comparison.new_patterns:
+        lines.append("None.")
+    else:
+        for sp in comparison.new_patterns:
+            p = sp.pattern
+            occ_word = "occurrence" if p.frequency == 1 else "occurrences"
+            lines.append(
+                f"- {p.display_name()} — {p.frequency} {occ_word}"
+            )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    lines.append("## Resolved patterns (in `before` only)")
+    lines.append("")
+    if not comparison.resolved_patterns:
+        lines.append("None.")
+    else:
+        for sp in comparison.resolved_patterns:
+            p = sp.pattern
+            occ_word = "occurrence" if p.frequency == 1 else "occurrences"
+            lines.append(
+                f"- {p.display_name()} — was {p.frequency} {occ_word}"
+            )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    lines.append("## Persisting patterns")
+    lines.append("")
+    if not comparison.persisting_patterns:
+        lines.append("None.")
+    else:
+        lines.append("| Pattern | Before | After | Δ frequency |")
+        lines.append("|---|---|---|---|")
+        for before_sp, after_sp in comparison.persisting_patterns:
+            from triage.comparer import _pct_change
+            delta = _pct_change(
+                before_sp.pattern.frequency, after_sp.pattern.frequency
+            )
+            lines.append(
+                f"| {after_sp.pattern.display_name()} "
+                f"| {before_sp.pattern.frequency} "
+                f"| {after_sp.pattern.frequency} "
+                f"| {delta} |"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _comparison_headlines(comparison: ComparisonReport) -> list[str]:
+    """Pick the top few facts a reader should see first."""
+    headlines: list[str] = []
+    for d in comparison.deltas:
+        label = CLASSIFICATION_LABELS.get(d.classification, d.classification)
+        change = d.frequency_change
+        if change == "stable":
+            continue
+        headlines.append(f"{label}: {change} ({d.before_frequency} → {d.after_frequency})")
+        unrec_change = d.unrecovered_change
+        if unrec_change not in ("stable",) and (
+            d.before_unrecovered != 0 or d.after_unrecovered != 0
+        ):
+            headlines.append(
+                f"{label} unrecovered: {unrec_change} "
+                f"({d.before_unrecovered} → {d.after_unrecovered})"
+            )
+    if comparison.new_patterns:
+        for sp in comparison.new_patterns[:3]:
+            headlines.append(f"new pattern: {sp.pattern.display_name()}")
+    if comparison.resolved_patterns:
+        for sp in comparison.resolved_patterns[:3]:
+            headlines.append(f"resolved: {sp.pattern.display_name()}")
+    return headlines

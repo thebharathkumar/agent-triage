@@ -218,7 +218,7 @@ MINIMAL_EVENT: dict = {
 def test_top_zero_is_rejected(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "0", p])
+    result = runner.invoke(main, ["report", "--top", "0", p])
     assert result.exit_code != 0
     assert "0" in result.output or "invalid" in result.output.lower()
 
@@ -226,14 +226,14 @@ def test_top_zero_is_rejected(tmp_path):
 def test_top_negative_is_rejected(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "-1", p])
+    result = runner.invoke(main, ["report", "--top", "-1", p])
     assert result.exit_code != 0
 
 
 def test_top_one_produces_single_incident(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "1", p])
+    result = runner.invoke(main, ["report", "--top", "1", p])
     assert result.exit_code == 0
     assert "# Triage Report" in result.output
     assert result.output.count("## #") == 1
