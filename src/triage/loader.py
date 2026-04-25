@@ -1,8 +1,13 @@
-"""loader.py - parse NDJSON trace files into validated event objects."""
+"""loader.py - parse trace files into validated event objects.
+
+Parsing dispatch lives in `triage.adapters`. This module owns the
+TraceEvent schema and the LoadResult aggregator, but the actual
+file-format parsing is plugin-shaped so that new trace schemas can be
+added without touching the loader.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -53,30 +58,30 @@ class LoadResult(BaseModel):
     parse_errors: list[str]
 
 
-def load_files(paths: list[Path]) -> LoadResult:
-    """Read one or more NDJSON files and return all validated TraceEvents."""
+def load_files(
+    paths: list[Path], format: str | None = None
+) -> LoadResult:
+    """Read one or more trace files and return all validated TraceEvents.
+
+    The format is resolved per-path via `adapter_for_path`, so a single
+    invocation can mix NDJSON and OTel files. Pass `format` to override
+    the auto-detection for every path in the call (useful when files
+    have non-standard extensions).
+    """
+    # Imported here to avoid a circular import: adapters imports
+    # TraceEvent from this module.
+    from triage.adapters import adapter_for_path
+
     events: list[TraceEvent] = []
     source_files: list[str] = []
     parse_errors: list[str] = []
 
     for path in paths:
         source_files.append(str(path))
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            parse_errors.append(f"{path}: cannot read file - {exc}")
-            continue
-
-        for lineno, raw_line in enumerate(text.splitlines(), start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-                event = TraceEvent.model_validate(data)
-                events.append(event)
-            except (json.JSONDecodeError, ValueError) as exc:
-                parse_errors.append(f"{path}:{lineno}: {exc}")
+        adapter = adapter_for_path(path, override=format)
+        adapter_events, adapter_errors = adapter.load(path)
+        events.extend(adapter_events)
+        parse_errors.extend(adapter_errors)
 
     return LoadResult(
         events=events,
