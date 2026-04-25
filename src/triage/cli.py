@@ -7,13 +7,24 @@ from pathlib import Path
 
 import click
 
+from triage.comparer import compare_event_batches
 from triage.grouper import group_events
 from triage.loader import load_files
-from triage.reporter import build_report
+from triage.reporter import build_comparison_report, build_report
 from triage.scorer import score_patterns
 
 
-@click.command()
+@click.group()
+@click.version_option(package_name="triage")
+def main() -> None:
+    """Analyze agent trace files.
+
+    Run a morning severity report or compare two batches of runs to see
+    what got better or worse between them.
+    """
+
+
+@main.command("report")
 @click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
 @click.option(
     "--output",
@@ -30,21 +41,20 @@ from triage.scorer import score_patterns
     show_default=True,
     help="Number of top incidents to include in the report.",
 )
-@click.version_option(package_name="triage")
-def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
-    """Analyze agent trace files and produce a morning severity report.
+def report(files: tuple[Path, ...], output: Path | None, top: int) -> None:
+    """Produce a ranked morning severity report from one or more trace files.
 
     Pass one or more NDJSON trace files as arguments. Glob expansion is
     handled by your shell, so you can do:
 
-        triage runs/phase4/*.ndjson
+        triage report runs/phase4/*.ndjson
 
     The report goes to stdout by default. Use --output to write to a file.
     """
     if not files:
         click.echo(
             "Error: provide at least one NDJSON file. "
-            "Example: triage runs/phase4/events_seed42.ndjson",
+            "Example: triage report runs/phase4/events_seed42.ndjson",
             err=True,
         )
         sys.exit(1)
@@ -60,14 +70,12 @@ def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
         sys.exit(1)
 
     patterns = group_events(result.events)
-
-    # Count distinct run IDs
     run_ids = {e.run_id for e in result.events}
     total_runs = len(run_ids)
 
     scored = score_patterns(patterns, result.events, total_runs)
 
-    report = build_report(
+    text = build_report(
         scored=scored,
         total_runs=total_runs,
         total_patterns=len(patterns),
@@ -75,12 +83,60 @@ def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
         top_n=top,
     )
 
-    if output:
-        try:
-            output.write_text(report, encoding="utf-8")
-            click.echo(f"Report written to {output}", err=True)
-        except OSError as exc:
-            click.echo(f"Error writing to {output}: {exc}", err=True)
-            sys.exit(1)
-    else:
-        click.echo(report)
+    _emit(text, output)
+
+
+@main.command("compare")
+@click.argument("before", type=click.Path(exists=True, path_type=Path))
+@click.argument("after", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Write comparison report to this file instead of stdout.",
+)
+def compare(before: Path, after: Path, output: Path | None) -> None:
+    """Diff two batches of trace events.
+
+    Reports per-classification frequency and unrecovered-count deltas,
+    new patterns that appeared only in `after`, patterns resolved
+    between `before` and `after`, and the changes in patterns that
+    persisted across both. Useful for answering "did this architecture
+    change make the agents better".
+
+        triage compare runs/before.ndjson runs/after.ndjson
+    """
+    before_result = load_files([before])
+    after_result = load_files([after])
+
+    for err in before_result.parse_errors + after_result.parse_errors:
+        click.echo(f"[parse error] {err}", err=True)
+
+    if not before_result.events or not after_result.events:
+        click.echo("No events loaded from one or both inputs.", err=True)
+        sys.exit(1)
+
+    comparison = compare_event_batches(
+        before_result.events, after_result.events
+    )
+
+    text = build_comparison_report(
+        comparison=comparison,
+        before_path=str(before),
+        after_path=str(after),
+    )
+
+    _emit(text, output)
+
+
+def _emit(text: str, output: Path | None) -> None:
+    if output is None:
+        click.echo(text)
+        return
+    try:
+        output.write_text(text, encoding="utf-8")
+        click.echo(f"Report written to {output}", err=True)
+    except OSError as exc:
+        click.echo(f"Error writing to {output}: {exc}", err=True)
+        sys.exit(1)

@@ -26,25 +26,45 @@ pip install -e ".[dev]"
 ### Run on a trace file
 
 ```bash
-triage runs/phase4/events_seed42.ndjson
+triage report runs/phase4/events_seed42.ndjson
 ```
 
 Or on multiple files (shell glob):
 
 ```bash
-triage runs/phase4/*.ndjson
+triage report runs/phase4/*.ndjson
 ```
 
 Write to a file instead of stdout:
 
 ```bash
-triage runs/phase4/events_seed42.ndjson --output examples/seed42-report.md
+triage report runs/phase4/events_seed42.ndjson --output examples/seed42-report.md
 ```
+
+### Compare two batches
+
+`triage compare` answers a different question than the morning report:
+not "what should I look at" but "did the change between these two
+batches make agent behavior better or worse, and where". Useful when
+diffing pre- and post-architecture-change runs, A/B prompts, or two
+model versions.
+
+```bash
+triage compare runs/before.ndjson runs/after.ndjson
+```
+
+Output reports per-classification frequency and unrecovered-count
+deltas, plus the set diff of pattern IDs (new in `after`, resolved
+since `before`, and persisting). See
+[examples/compare-before-after.md](examples/compare-before-after.md)
+for a real comparison.
 
 ### See all options
 
 ```bash
 triage --help
+triage report --help
+triage compare --help
 ```
 
 ---
@@ -262,7 +282,7 @@ Three is the number of things a person can hold in working memory while still be
 
 ## Example Output
 
-Two reports are checked in:
+Three reports are checked in:
 
 - [examples/monday-report.md](examples/monday-report.md) — a synthetic but
   realistic "Monday morning" report across three weekend runs. Shows the
@@ -273,6 +293,11 @@ Two reports are checked in:
 - [examples/seed42-report.md](examples/seed42-report.md) — a report
   generated from `runs/phase4/events_seed42.ndjson` (real
   dungeon-traces output).
+- [examples/compare-before-after.md](examples/compare-before-after.md) —
+  a `triage compare` regression report between
+  `runs/examples/before.ndjson` and `runs/examples/monday.ndjson`,
+  showing classification deltas, a newly-emerging tool error, and a
+  resolved environment-constraint pattern.
 
 ---
 
@@ -288,19 +313,22 @@ pytest --cov=src/triage --cov-report=term-missing
 
 ```
 src/triage/
-  cli.py        Entry point (argparse via Click)
+  cli.py        Entry point — Click group with `report` and `compare` subcommands
   loader.py     NDJSON parsing and Pydantic schema validation
   grouper.py    Incident pattern detection and clustering
   scorer.py     Severity scoring model
-  reporter.py   Markdown report generation
+  comparer.py   Before/after diff: classification deltas + pattern set diff
+  reporter.py   Markdown report generation (per-batch and comparison)
 
 tests/
   conftest.py       Shared fixtures and event factory
   test_loader.py    Loader unit tests
   test_grouper.py   Grouper unit tests
   test_scorer.py    Scorer unit tests
+  test_comparer.py  Comparer unit tests
 
 runs/phase4/        Sample trace files
+runs/examples/      Synthetic traces driving the example reports
 examples/           Generated example reports
 ```
 
