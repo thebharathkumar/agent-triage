@@ -279,15 +279,17 @@ def build_comparison_report(
     lines.append("")
     lines.append(
         "| Classification | Before | After | Δ frequency | "
-        "Unrecovered before | Unrecovered after | Δ unrecovered |"
+        "Unrecovered before | Unrecovered after | Δ unrecovered | "
+        "Δ recovery latency |"
     )
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for d in comparison.deltas:
         label = CLASSIFICATION_LABELS.get(d.classification, d.classification)
         lines.append(
             f"| {label} | {d.before_frequency} | {d.after_frequency} | "
             f"{d.frequency_change} | {d.before_unrecovered} | "
-            f"{d.after_unrecovered} | {d.unrecovered_change} |"
+            f"{d.after_unrecovered} | {d.unrecovered_change} | "
+            f"{d.latency_change} |"
         )
     lines.append("")
     lines.append("---")
@@ -362,6 +364,12 @@ def _comparison_headlines(comparison: ComparisonReport) -> list[str]:
                 f"{label} unrecovered: {unrec_change} "
                 f"({d.before_unrecovered} → {d.after_unrecovered})"
             )
+        latency_change = d.latency_change
+        if (
+            latency_change not in ("n/a",)
+            and not latency_change.startswith("stable")
+        ):
+            headlines.append(f"{label} recovery latency: {latency_change}")
     if comparison.new_patterns:
         for sp in comparison.new_patterns[:3]:
             headlines.append(f"new pattern: {sp.pattern.display_name()}")

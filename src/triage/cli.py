@@ -99,16 +99,29 @@ def report(files: tuple[Path, ...], output: Path | None, top: int) -> None:
 def compare(before: Path, after: Path, output: Path | None) -> None:
     """Diff two batches of trace events.
 
-    Reports per-classification frequency and unrecovered-count deltas,
-    new patterns that appeared only in `after`, patterns resolved
-    between `before` and `after`, and the changes in patterns that
-    persisted across both. Useful for answering "did this architecture
-    change make the agents better".
+    Reports per-classification frequency, unrecovered-count, and
+    recovery-latency deltas, new patterns that appeared only in `after`,
+    patterns resolved between `before` and `after`, and changes in
+    patterns that persisted across both.
 
+    Each argument can be a single .ndjson file or a directory; in the
+    directory case every `.ndjson` file directly inside it is loaded
+    (non-recursively). This makes the command pipeline-friendly:
+
+        triage compare runs/before/ runs/after/
         triage compare runs/before.ndjson runs/after.ndjson
     """
-    before_result = load_files([before])
-    after_result = load_files([after])
+    before_files = _expand_to_ndjson_paths(before)
+    after_files = _expand_to_ndjson_paths(after)
+
+    if not before_files or not after_files:
+        click.echo(
+            "No .ndjson files found in one or both inputs.", err=True
+        )
+        sys.exit(1)
+
+    before_result = load_files(before_files)
+    after_result = load_files(after_files)
 
     for err in before_result.parse_errors + after_result.parse_errors:
         click.echo(f"[parse error] {err}", err=True)
@@ -123,11 +136,28 @@ def compare(before: Path, after: Path, output: Path | None) -> None:
 
     text = build_comparison_report(
         comparison=comparison,
-        before_path=str(before),
-        after_path=str(after),
+        before_path=_format_path_label(before, before_files),
+        after_path=_format_path_label(after, after_files),
     )
 
     _emit(text, output)
+
+
+def _expand_to_ndjson_paths(path: Path) -> list[Path]:
+    """Resolve a CLI path to a sorted list of ndjson files.
+
+    Files map to themselves; directories expand to their direct
+    `*.ndjson` children. Sorting keeps the output deterministic.
+    """
+    if path.is_dir():
+        return sorted(path.glob("*.ndjson"))
+    return [path]
+
+
+def _format_path_label(original: Path, expanded: list[Path]) -> str:
+    if original.is_dir():
+        return f"{original}/ ({len(expanded)} file(s))"
+    return str(original)
 
 
 def _emit(text: str, output: Path | None) -> None:
