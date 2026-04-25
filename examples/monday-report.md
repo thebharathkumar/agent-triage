@@ -1,6 +1,6 @@
 # Triage Report
 
-Generated: 2026-04-25 03:03 UTC
+Generated: 2026-04-25 03:08 UTC
 
 **3 run(s) analyzed. 3 incident pattern(s) detected. Top 3 worth your attention this morning.**
 
@@ -16,6 +16,8 @@ Sources: `runs/examples/monday.ndjson`
 |--------|-------|
 | Severity Score | 15.00 / 15.00 |
 | Frequency | 11 event(s) across 3 run(s) |
+| Appeared in | 3/3 runs |
+| Trend | stable |
 | Recovery Rate | [----------] 0% |
 | Recovery Latency | no recoveries observed |
 | Tail Risk | 11 failures unrecovered after 10 turns |
@@ -24,7 +26,7 @@ Sources: `runs/examples/monday.ndjson`
 
 **Why this matters:**
 
-Agent planner hit a **Coordination Failure** on `dispatch_subtask` 11 time(s) across 3 runs. None of these failures were followed by a successful action within 3 turns, meaning the agent got stuck rather than adapting. Belief divergence was present on field(s): retriever_state, task_queue_head, meaning the agent was operating on stale world state when it failed. With a final score of 13.00, this pattern ranks high because its classification carries significant weight in the scoring model.
+Agent planner hit a **Coordination Failure** on `dispatch_subtask` 11 time(s) across 3 runs. Appeared in 3/3 runs; trend is stable. None of these failures were followed by a successful action within 3 turns, meaning the agent got stuck rather than adapting. Belief divergence was present on field(s): retriever_state, task_queue_head, meaning the agent was operating on stale world state when it failed. With a final score of 13.00, this pattern ranks high because its classification carries significant weight in the scoring model.
 
 **Suggested next action:** Review inter-agent messaging cadence and add position-sync checkpoints before high-stakes joint actions.
 
@@ -38,6 +40,8 @@ Agent planner hit a **Coordination Failure** on `dispatch_subtask` 11 time(s) ac
 |--------|-------|
 | Severity Score | 10.50 / 15.00 |
 | Frequency | 2 event(s) across 2 run(s) |
+| Appeared in | 2/3 runs |
+| Trend | new |
 | Recovery Rate | [----------] 0% |
 | Recovery Latency | no recoveries observed |
 | Tail Risk | 2 failures unrecovered after 10 turns |
@@ -46,7 +50,7 @@ Agent planner hit a **Coordination Failure** on `dispatch_subtask` 11 time(s) ac
 
 **Why this matters:**
 
-Agent executor hit a **Agent Error** on `call_external_api` 2 time(s) across 2 runs. None of these failures were followed by a successful action within 3 turns, meaning the agent got stuck rather than adapting. With a final score of 7.03, this pattern ranks high because its classification carries significant weight in the scoring model.
+Agent executor hit a **Agent Error** on `call_external_api` 2 time(s) across 2 runs. Appeared in 2/3 runs; this is a newly-emerging pattern. None of these failures were followed by a successful action within 3 turns, meaning the agent got stuck rather than adapting. With a final score of 7.03, this pattern ranks high because its classification carries significant weight in the scoring model.
 
 **Suggested next action:** Inspect the agent's reasoning trace at the failing turns; check if the action selection logic handles boundary states.
 
@@ -60,6 +64,8 @@ Agent executor hit a **Agent Error** on `call_external_api` 2 time(s) across 2 r
 |--------|-------|
 | Severity Score | 5.00 / 15.00 |
 | Frequency | 6 event(s) across 3 run(s) |
+| Appeared in | 3/3 runs |
+| Trend | stable |
 | Recovery Rate | [##########] 100% |
 | Recovery Latency | median recovery latency: 2 turns |
 | Tail Risk | no tail risk |
@@ -68,7 +74,7 @@ Agent executor hit a **Agent Error** on `call_external_api` 2 time(s) across 2 r
 
 **Why this matters:**
 
-Agent retriever hit a **Information Lag** on `fetch_documents` 6 time(s) across 3 runs. About 100% of occurrences were followed by a successful action within 3 turns (median latency 2 turns), suggesting partial self-correction. Belief divergence was present on field(s): index_version, meaning the agent was operating on stale world state when it failed. With a final score of 5.18, this pattern ranks high because its classification carries significant weight in the scoring model.
+Agent retriever hit a **Information Lag** on `fetch_documents` 6 time(s) across 3 runs. Appeared in 3/3 runs; trend is stable. About 100% of occurrences were followed by a successful action within 3 turns (median latency 2 turns), suggesting partial self-correction. Belief divergence was present on field(s): index_version, meaning the agent was operating on stale world state when it failed. With a final score of 5.18, this pattern ranks high because its classification carries significant weight in the scoring model.
 
 **Suggested next action:** Increase belief-state refresh frequency or add an explicit re-observe step after N turns without a sync message.
 

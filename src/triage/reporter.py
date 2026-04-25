@@ -125,14 +125,31 @@ def _explain(sp: ScoredPattern, total_runs: int) -> str:
             "meaning the agent was operating on stale world state when it failed."
         )
 
+    recurrence_note = _recurrence_note(sp)
+
     return (
         f"Agent {p.agent_id} hit a **{label}** on `{p.tool_name}` "
         f"{freq} time(s) across {run_count} {run_word}. "
+        f"{recurrence_note}"
         f"{recovery_note}"
         f"{div_note} "
         f"With a final score of {sp.final_score:.2f}, this pattern ranks high "
         "because its classification carries significant weight in the scoring model."
     )
+
+
+def _recurrence_note(sp: ScoredPattern) -> str:
+    """One-sentence recurrence summary for _explain, or empty when N/A."""
+    if sp.runs_total <= 1:
+        return ""
+    coverage = f"Appeared in {sp.runs_seen_in}/{sp.runs_total} runs"
+    if sp.trend == "insufficient data":
+        return f"{coverage}. "
+    if sp.trend == "new":
+        return f"{coverage}; this is a newly-emerging pattern. "
+    if sp.trend == "resolved":
+        return f"{coverage}; the pattern appears to have resolved in recent runs. "
+    return f"{coverage}; trend is {sp.trend}. "
 
 
 def build_report(
@@ -183,6 +200,10 @@ def build_report(
         lines.append("|--------|-------|")
         lines.append(f"| Severity Score | {sp.severity_score:.2f} / 15.00 |")
         lines.append(f"| Frequency | {p.frequency} event(s) across {len(p.run_ids)} run(s) |")
+        lines.append(
+            f"| Appeared in | {sp.runs_seen_in}/{sp.runs_total} runs |"
+        )
+        lines.append(f"| Trend | {sp.trend} |")
         lines.append(f"| Recovery Rate | {_recovery_bar(sp.recovery_rate)} |")
         lines.append(f"| Recovery Latency | {_format_latency(sp)} |")
         lines.append(f"| Tail Risk | {_format_tail_risk(sp)} |")
