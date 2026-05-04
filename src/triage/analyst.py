@@ -1,4 +1,4 @@
-"""analyst.py - LLM-powered root-cause narratives via Claude API."""
+"""analyst.py - LLM-powered root-cause narratives via the Anthropic API."""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ class AnalysisResult:
 
 
 def analyze_pattern(sp: ScoredPattern, *, api_key: str | None = None) -> AnalysisResult:
-    """Send a scored pattern to Claude and return a root-cause narrative.
+    """Send a scored pattern to the LLM and return a root-cause narrative.
 
     Requires the ``anthropic`` package (``pip install 'triage[ai]'``) and
     an ``ANTHROPIC_API_KEY`` environment variable (or pass ``api_key``).
-    Uses ``claude-haiku-4-5`` with prompt caching on the system prompt to
-    keep per-call cost low.
+    Uses Haiku with prompt caching on the system prompt to keep
+    per-call cost low.
     """
     try:
         import anthropic
