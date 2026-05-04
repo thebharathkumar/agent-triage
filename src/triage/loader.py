@@ -8,6 +8,7 @@ added without touching the loader.
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ class TraceEvent(BaseModel):
     run_id: str
     turn: int
     agent_id: str
+    timestamp: datetime.datetime | None = None
     latency_ms: Latency = Field(default_factory=Latency)
     action_taken: ActionTaken
     action_succeeded: bool

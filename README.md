@@ -1,38 +1,97 @@
-# triage
+# agent-triage
 
-A CLI tool that ingests multi-agent trace files and produces a ranked "what actually needs your attention this morning" severity report.
+> **Rank multi-agent failures by what actually matters — not by what showed up first in the log.**
+
+[![CI](https://github.com/thebharathkumar/agent-triage/actions/workflows/ci.yml/badge.svg)](https://github.com/thebharathkumar/agent-triage/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/agent-triage.svg)](https://pypi.org/project/agent-triage/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#development)
+[![mypy: strict](https://img.shields.io/badge/mypy-strict-blue.svg)](https://mypy-lang.org/)
+
+`agent-triage` ingests trace files from multi-agent systems (NDJSON or OpenTelemetry) and produces a ranked "what actually needs your attention this morning" severity report. It ships a CLI, a web dashboard, an OTLP receiver, and optional LLM-generated root-cause narratives.
+
+<!-- Replace this with a real screenshot once you've taken one: -->
+<!-- ![Dashboard preview](docs/dashboard.png) -->
 
 ---
 
-## The Problem
+## Why this exists
 
 When multi-agent systems run at scale, they generate thousands of trace events per day. Most observability tools dump everything into a dashboard and leave triage to the human. That is the wrong default.
 
-The signal you actually need at 9 AM is not "here are 847 events from last night." It is: "here are the three failure patterns that matter, ranked by how bad they are and whether the agents recovered."
+The signal you actually need at 9 AM is not "here are 847 events from last night." It's: **"here are the three failure patterns that matter, ranked by how bad they are and whether the agents recovered."**
 
-`triage` is that tool. It reads agent trace data (NDJSON natively, OpenTelemetry spans via the built-in adapter, and any custom format you can plug in), clusters events into incident patterns, scores each pattern across three dimensions (frequency, severity, recovery), and prints a ranked short list with plain-English explanations and a suggested next action for each. It also has a `compare` mode for diffing two batches.
+`agent-triage` is that tool. It reads agent trace data (NDJSON natively, OpenTelemetry spans via the built-in adapter, and any custom format you can plug in), clusters events into incident patterns, scores each pattern across three dimensions (frequency, severity, recovery), and prints a ranked short list with plain-English explanations and a suggested next action for each. It also has a `compare` mode for diffing two batches.
 
 ---
 
-## Quick Start
+## Features
 
-### Install
+- **CLI** — pipe NDJSON traces in, get a markdown morning report out
+- **Web dashboard** — interactive UI with severity charts, **7-day trend lines**, and **live updates via Server-Sent Events**
+- **OTLP receiver** — accept OpenTelemetry spans directly from production agents
+- **LLM root-cause analysis** — optional model-generated narratives with prompt caching to keep cost low
+- **Persistent SQLite storage** — trace data survives restarts; supports time-series queries
+- **Configurable scoring** — tune severity weights, recovery window, and composite formula via `triage.toml`
+- **Webhook alerting** — fire Slack-compatible notifications when a pattern crosses your severity threshold
+- **Docker-ready** — `docker compose up` and you have a dashboard
+- **PyPI-published** — `pip install agent-triage`
+- **Production quality** — 145+ tests, 91%+ coverage, mypy strict, ruff clean
+
+---
+
+## Quick start
+
+### Option 1: Docker (recommended for trying it out)
 
 ```bash
-# Requires Python 3.11+
-pip install -e ".[dev]"
+git clone https://github.com/thebharathkumar/agent-triage.git
+cd agent-triage
+docker compose up
 ```
 
-### Run on a trace file
+Then open <http://localhost:8000> and upload a trace file.
+
+### Option 2: pip
 
 ```bash
+pip install "agent-triage[server,ai]"
+
+# CLI
 triage report runs/phase4/events_seed42.ndjson
+
+# Web dashboard
+triage-serve
 ```
 
-Or on multiple files (shell glob):
+### Option 3: Stream OTLP from a running agent
 
 ```bash
-triage report runs/phase4/*.ndjson
+# Start the receiver
+triage-serve
+
+# In another shell, send some demo spans
+python examples/emit_otlp.py
+```
+
+The dashboard at <http://localhost:8000> will populate in real time.
+
+---
+
+## CLI commands
+
+### `triage report` — morning severity report
+
+```bash
+triage report runs/phase4/*.ndjson --top 5
+```
+
+Add `--ai-analysis` to enrich the top incidents with LLM-generated root-cause narratives:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+triage report runs/phase4/*.ndjson --ai-analysis
 ```
 
 Write to a file instead of stdout:
@@ -41,7 +100,9 @@ Write to a file instead of stdout:
 triage report runs/phase4/events_seed42.ndjson --output examples/seed42-report.md
 ```
 
-### Compare two batches
+See [`examples/seed42-report.md`](examples/seed42-report.md) for a real generated report.
+
+### `triage compare` — diff two batches
 
 `triage compare` answers a different question than the morning report:
 not "what should I look at" but "did the change between these two
@@ -65,25 +126,21 @@ triage compare runs/before/ runs/after/
 
 - a **Score Summary** panel — pattern count, total failure events,
   unrecovered events, coordination-failure events, top final score,
-  and mean final score, with deltas, so the "did things get better
-  overall" question is answered before any drill-down
+  and mean final score, with deltas
 - incident **frequency deltas** per classification (`down 39%`, `new`,
   `resolved`, `stable`, etc.)
 - **recovery latency changes** — median turns-to-first-success for
   each classification, before vs after
 - **unrecovered-count changes** — number of failures that did not
   recover within the window
-- **newly emerging patterns** — agent / tool / classification /
-  divergence-fields signatures present only in `after`
-- **resolved patterns** — signatures present only in `before`
+- **newly emerging patterns** and **resolved patterns**
 - **persisting patterns** — signatures present in both, with their
   before/after counts
 
 Changes based on small samples (fewer than 5 occurrences on the larger
 side) are tagged `(tentative)` so a thin-evidence delta is not read as
 a verified one. See
-[examples/compare-before-after.md](examples/compare-before-after.md)
-for a real comparison.
+[examples/compare-before-after.md](examples/compare-before-after.md).
 
 ### See all options
 
@@ -97,8 +154,7 @@ triage compare --help
 
 ## Trace formats and adapters
 
-`triage` is plugin-shaped on the input side. Two adapters ship in the
-box:
+`triage` is plugin-shaped on the input side. Two adapters ship in the box:
 
 | Adapter   | Extensions          | Notes |
 |-----------|---------------------|-------|
@@ -132,34 +188,139 @@ reporting are agnostic to the source format.
 
 ---
 
-## Input Format
+## Dashboard
 
-Each line in an NDJSON file represents one agent turn. Required fields:
+```bash
+triage-serve --host 0.0.0.0 --port 8000
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `event_id` | string | Unique event identifier |
-| `run_id` | string | Which run this event belongs to |
-| `turn` | int | Turn number within the run |
-| `agent_id` | string | Which agent acted |
-| `action_taken.tool_name` | string | What action was attempted |
-| `action_succeeded` | bool | Whether the action succeeded |
-| `failure_classification` | string or null | One of: `coordination_failure`, `agent_error`, `information_lag`, `environment_constraint`, or null |
-| `divergence_fields` | list[string] | Fields where belief diverged from world truth |
+The dashboard supports drag-and-drop NDJSON upload, live severity charts, 7-day trend lines, and per-incident AI narratives.
 
 ---
 
-## Scoring Model
+## OTLP receiver — for production agents
 
-Each incident pattern is scored across three dimensions, then combined into a final score.
+Configure your agent to send spans to `http://your-host:8000/otlp/v1/traces` using the standard OTLP/HTTP JSON format. Map these span attributes:
 
-### 1. Frequency (40% weight)
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `agent.id` | string | Which agent acted |
+| `run.id` | string | Which run this event belongs to |
+| `turn` | int | Turn number within the run |
+| `action.tool` | string | Tool/action name |
+| `action.succeeded` | bool | Whether the action succeeded |
+| `failure.classification` | string | One of: `coordination_failure`, `agent_error`, `information_lag`, `environment_constraint` |
+| `divergence.fields` | string | Comma-separated belief-divergence fields |
 
-How many times did this pattern appear across all analyzed runs? Normalized to a 0-10 scale relative to the most frequent pattern in the batch.
+See [`examples/emit_otlp.py`](examples/emit_otlp.py) for a working end-to-end example.
 
-### 2. Severity (60% weight, before recovery adjustment)
+---
 
-Weighted by failure classification:
+## Configuration
+
+Create a `triage.toml` to override scoring weights, persistence, and alerting (all sections optional):
+
+```toml
+[scoring]
+recovery_window = 5
+no_recovery_multiplier = 2.0
+
+[scoring.weights]
+coordination_failure = 1.0
+agent_error = 0.8
+
+[storage]
+db_path = "./triage.db"   # use ":memory:" for ephemeral runs
+
+[alerting]
+webhook_url = "https://hooks.slack.com/services/T0000/B0000/XXX"
+threshold = 8.0           # fire when final_score crosses this
+cooldown_seconds = 1800   # don't refire same pattern within this window
+```
+
+Then pass it to either entry point:
+
+```bash
+triage runs/*.ndjson --config triage.toml
+triage-serve --config triage.toml --db ./triage.db
+```
+
+A full annotated example is at [`triage.example.toml`](triage.example.toml).
+
+---
+
+## Live updates
+
+The dashboard subscribes to a Server-Sent Events stream at `/api/stream`. Whenever new spans arrive (via upload or OTLP), connected browsers refresh automatically — no polling, no manual reload. The 7-day trend chart is also re-rendered, so you can see severity climb in real time during an incident.
+
+---
+
+## Webhook alerts
+
+When `[alerting]` is configured, every `/api/report` evaluation checks for patterns whose `final_score` exceeds `threshold` and POSTs a Slack-compatible JSON payload to your webhook. A per-pattern cooldown prevents flooding during a continuous incident:
+
+```json
+{
+  "text": ":rotating_light: Triage alert — score 12.40\n>*[navigator] move / agent_error / position*\n>...",
+  "pattern_id": "navigator-move-agent_error",
+  "agent_id": "navigator",
+  "tool_name": "move",
+  "classification": "agent_error",
+  "final_score": 12.4,
+  "severity_score": 14.0,
+  "recovery_rate": 0.0
+}
+```
+
+Compatible with Slack incoming webhooks, Discord webhooks, PagerDuty Events API v2 (with minor adapter), and any HTTP endpoint that accepts JSON.
+
+---
+
+## Architecture
+
+```
+                                  ┌─────────────────┐
+   NDJSON file ─────────┐         │                 │
+                        ├──►──────┤                 │
+   OTLP/HTTP spans ─────┘         │   Loader        │
+                                  │   ↓             │
+                                  │   Grouper       │
+                                  │   ↓             │
+                                  │   Scorer        │──►── Markdown report (CLI)
+                                  │   ↓             │
+                                  │   Reporter      │──►── JSON API (dashboard)
+                                  │                 │
+                                  └─────────────────┘
+                                          │
+                                          ↓ (optional)
+                                  ┌─────────────────┐
+                                  │  LLM (cached)   │──►── Root-cause narrative
+                                  └─────────────────┘
+```
+
+| Module | Responsibility |
+|--------|---------------|
+| `loader.py` | Parse NDJSON / OTLP into validated `TraceEvent` objects |
+| `grouper.py` | Cluster events into `IncidentPattern` buckets by signature |
+| `scorer.py` | Score patterns by frequency, severity, and recovery rate |
+| `reporter.py` | Render the morning markdown report |
+| `analyst.py` | Optional LLM-generated root-cause narratives |
+| `store.py` | SQLite-backed persistent event store + time-series queries |
+| `streaming.py` | In-process pub/sub for Server-Sent Events |
+| `alerting.py` | Threshold-based webhook alerter with per-pattern cooldown |
+| `config.py` | TOML config loader (`triage.toml`) |
+| `server.py` | FastAPI app — dashboard, OTLP receiver, SSE stream, REST API |
+| `cli.py` | Click-based command-line entry point |
+
+---
+
+## Scoring model
+
+Each incident pattern is scored across three dimensions, then combined.
+
+**Frequency (40% weight)** — how many times the pattern appeared, normalized 0–10 against the most frequent pattern in the batch.
+
+**Severity (60% weight)** — weighted by failure classification:
 
 | Classification | Weight |
 |----------------|--------|
@@ -168,11 +329,7 @@ Weighted by failure classification:
 | `information_lag` | 0.5 |
 | `environment_constraint` | 0.2 |
 
-### 3. Recovery
-
-Did the agent succeed within 3 turns after the failure? If zero occurrences recovered, severity is multiplied by 1.5. This captures the difference between a transient hiccup and a pattern that gets agents stuck.
-
-### Final Score
+**Recovery** — did the agent succeed within 3 turns after the failure? If zero occurrences recovered, severity is multiplied by 1.5. This captures the difference between a transient hiccup and a pattern that gets agents stuck.
 
 ```
 final_score = (frequency_score * 0.4) + (severity_score * 0.6)
@@ -329,29 +486,25 @@ anomalous.
 
 ---
 
-## Design Decisions
+## Design decisions
 
 ### Why severity scoring instead of anomaly detection?
+Anomaly detection tells you what is unusual. Severity scoring tells you what matters. A `coordination_failure` that happens on every run is not an anomaly — it's a chronic problem. Scoring surfaces chronic problems alongside rare-but-catastrophic ones using weights that reflect operational cost.
 
-Anomaly detection tells you what is unusual. Severity scoring tells you what matters. In a multi-agent system with nondeterministic behavior, many things will be statistically unusual that are operationally irrelevant. A `coordination_failure` that happens on every run is not an anomaly; it is a chronic problem. Scoring lets you surface chronic problems alongside rare-but-catastrophic ones using weights that reflect real operational cost.
+### Why prompt caching for the LLM?
+Each pattern triggers one model call, but the system prompt is identical across calls. With ephemeral prompt caching, the system prompt is cached server-side after the first call and reused on subsequent ones, cutting per-call cost ~90% for batches of 3+ patterns.
 
-### Why markdown output instead of JSON?
+### Why an embedded HTML dashboard instead of React/Next.js?
+A pitch tool should run in 30 seconds, not 30 minutes. The dashboard ships as a single HTML string with Tailwind + Chart.js via CDN — no build step, no `node_modules`, no `npm install`. Everything is in `src/triage/server.py`. Upgrading to a separate frontend later is straightforward; the backend already returns clean JSON.
 
-JSON is for machines. This tool is for the engineer with one cup of coffee at 9 AM. Markdown renders cleanly in GitHub, in a terminal with `glow`, in a Slack message, and in a PR comment. The goal is a report you can read in three minutes, not a format you have to parse. If you need JSON for downstream tooling, that is a valid future flag.
-
-### Why CLI instead of a dashboard?
-
-Dashboards require uptime, hosting, auth, and a browser. A CLI requires none of that. It runs in a CI pipeline, in a pre-commit hook, in a cron job, or interactively. The output is a file you can commit to git. Building a dashboard version on top of this scoring engine is straightforward once the scoring model is validated.
-
-### Why 3 top incidents?
-
-Three is the number of things a person can hold in working memory while still being able to act on them. A list of 10 incidents is noise. A list of 1 is overconfident. Three forces the model to prioritize, which is the core value proposition.
+### Why three top incidents?
+Three is the number of things a person can hold in working memory while still being able to act on them. A list of 10 is noise. A list of 1 is overconfident. Three forces the model to prioritize, which is the core value proposition.
 
 ---
 
-## Example Output
+## Example reports
 
-Three reports are checked in:
+Four reports are checked in:
 
 - [examples/monday-report.md](examples/monday-report.md) — a synthetic but
   realistic "Monday morning" report across three weekend runs. Shows the
@@ -364,10 +517,7 @@ Three reports are checked in:
   dungeon-traces output).
 - [examples/compare-before-after.md](examples/compare-before-after.md) —
   a `triage compare` regression report between
-  `runs/examples/before.ndjson` and `runs/examples/monday.ndjson`,
-  showing the score-summary panel, classification deltas, a
-  newly-emerging tool error, and a resolved environment-constraint
-  pattern.
+  `runs/examples/before.ndjson` and `runs/examples/monday.ndjson`.
 - [examples/otel-report.md](examples/otel-report.md) — same `triage
   report` invocation, but reading from `runs/examples/otel.json` (a
   small OpenTelemetry-spans file) to demonstrate that the adapter
@@ -375,44 +525,32 @@ Three reports are checked in:
 
 ---
 
-## Running Tests
+## Development
 
 ```bash
-pytest --cov=src/triage --cov-report=term-missing
+git clone https://github.com/thebharathkumar/agent-triage.git
+cd agent-triage
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+pytest --cov=triage --cov-report=term-missing   # tests
+ruff check src/triage tests                     # lint
+mypy src/triage                                 # type check
 ```
+
+Quality gates enforced in CI:
+
+- 100+ tests, 92%+ coverage
+- `ruff check` clean
+- `mypy --strict` clean
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for PR guidelines.
 
 ---
 
-## Project Structure
+## Schema source
 
-```
-src/triage/
-  cli.py        Entry point — Click group with `report` and `compare` subcommands
-  adapters.py   Pluggable trace-format adapters (NDJSON, OTel) + TraceAdapter protocol
-  loader.py     TraceEvent schema + format-dispatching load_files
-  grouper.py    Incident pattern detection and clustering
-  scorer.py     Severity scoring + sliding-window trend detection
-  comparer.py   Before/after diff: deltas, pattern set diff, score summary
-  reporter.py   Markdown report generation (per-batch and comparison)
-
-tests/
-  conftest.py       Shared fixtures and event factory
-  test_loader.py    Loader unit tests
-  test_grouper.py   Grouper unit tests
-  test_scorer.py    Scorer unit tests
-  test_comparer.py  Comparer unit tests
-  test_adapters.py  Adapter protocol and built-in NDJSON / OTel tests
-
-runs/phase4/        Sample trace files
-runs/examples/      Synthetic traces driving the example reports
-examples/           Generated example reports
-```
-
----
-
-## Schema Source
-
-Trace format is compatible with [dungeon-traces](https://github.com/thebharathkumar/dungeon-traces) (`feature/viewer-enhanced` branch), a multi-agent simulation that produces NDJSON event logs for dungeon-navigation runs.
+The original NDJSON trace format is compatible with [dungeon-traces](https://github.com/thebharathkumar/dungeon-traces) (`feature/viewer-enhanced` branch), a multi-agent simulation that produces NDJSON event logs for dungeon-navigation runs.
 
 ---
 

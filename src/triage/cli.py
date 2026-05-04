@@ -9,6 +9,7 @@ import click
 
 from triage.adapters import ADAPTERS
 from triage.comparer import compare_event_batches
+from triage.config import TriageConfig
 from triage.grouper import group_events
 from triage.loader import load_files
 from triage.reporter import build_comparison_report, build_report
@@ -18,7 +19,7 @@ _FORMAT_CHOICES = sorted(ADAPTERS.keys())
 
 
 @click.group()
-@click.version_option(package_name="triage")
+@click.version_option(package_name="agent-triage")
 def main() -> None:
     """Analyze agent trace files.
 
@@ -54,11 +55,34 @@ def main() -> None:
         ".ndjson/.jsonl -> ndjson, .json -> otel."
     ),
 )
+@click.option(
+    "--ai-analysis",
+    is_flag=True,
+    default=False,
+    help="Enrich each top incident with an LLM-generated root-cause narrative.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    envvar="ANTHROPIC_API_KEY",
+    help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
+    show_envvar=True,
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a triage.toml config file (overrides scoring weights, etc.).",
+)
 def report(
     files: tuple[Path, ...],
     output: Path | None,
     top: int,
     format_: str | None,
+    ai_analysis: bool,
+    api_key: str | None,
+    config_path: Path | None,
 ) -> None:
     """Produce a ranked morning severity report from one or more trace files.
 
@@ -87,11 +111,24 @@ def report(
         click.echo("No events loaded. Check your input files.", err=True)
         sys.exit(1)
 
+    cfg = TriageConfig.from_file(config_path) if config_path else TriageConfig.default()
+
     patterns = group_events(result.events)
     run_ids = {e.run_id for e in result.events}
     total_runs = len(run_ids)
 
-    scored = score_patterns(patterns, result.events, total_runs)
+    scored = score_patterns(patterns, result.events, total_runs, config=cfg.scoring)
+
+    analyses = None
+    if ai_analysis:
+        from triage.analyst import analyze_patterns
+
+        try:
+            click.echo("Running AI root-cause analysis...", err=True)
+            analyses = analyze_patterns(scored, top_n=top, api_key=api_key)
+        except RuntimeError as exc:
+            click.echo(f"[ai-analysis] {exc}", err=True)
+            sys.exit(1)
 
     text = build_report(
         scored=scored,
@@ -99,6 +136,7 @@ def report(
         total_patterns=len(patterns),
         source_files=[str(f) for f in files],
         top_n=top,
+        analyses=analyses,
     )
 
     _emit(text, output)

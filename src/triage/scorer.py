@@ -6,10 +6,13 @@ from collections import Counter
 from dataclasses import dataclass
 from statistics import median
 
+from triage.config import ScoringConfig
 from triage.grouper import IncidentPattern
 from triage.loader import TraceEvent
 
-# Severity weights per failure classification
+# Module-level constants kept for backward-compat with imports elsewhere
+# (reporter.py uses RECOVERY_WINDOW). Configurable callers should pass
+# a ``ScoringConfig`` to ``score_patterns`` instead.
 CLASSIFICATION_WEIGHTS: dict[str, float] = {
     "coordination_failure": 1.0,
     "agent_error": 0.7,
@@ -17,11 +20,7 @@ CLASSIFICATION_WEIGHTS: dict[str, float] = {
     "environment_constraint": 0.2,
     "unclassified": 0.3,
 }
-
-# Multiplier applied to patterns with zero recovery
 NO_RECOVERY_MULTIPLIER = 1.5
-
-# How many turns after a failure to look for recovery
 RECOVERY_WINDOW = 3
 
 # Window used for the tail-risk signal. Failures that stay unrecovered after
@@ -101,13 +100,15 @@ class _RecoveryStats:
 
 
 def _compute_recovery_stats(
-    pattern: IncidentPattern, timeline: AgentTimeline
+    pattern: IncidentPattern,
+    timeline: AgentTimeline,
+    recovery_window: int = RECOVERY_WINDOW,
 ) -> _RecoveryStats:
     """Measure how and how quickly the agent recovered after each failure.
 
     Returns:
         recovery_rate: fraction of failures followed by a success within
-            RECOVERY_WINDOW turns.
+            ``recovery_window`` turns.
         median_latency: median turns-to-first-success across recovered events,
             or None if no events recovered.
         unrecovered_tail_count: failures with no success within
@@ -133,7 +134,7 @@ def _compute_recovery_stats(
             first_success_offset = turn - failure_turn
             break
 
-        if first_success_offset is not None and first_success_offset <= RECOVERY_WINDOW:
+        if first_success_offset is not None and first_success_offset <= recovery_window:
             recovered += 1
             latencies.append(first_success_offset)
 
@@ -238,8 +239,11 @@ def score_patterns(
     patterns: list[IncidentPattern],
     all_events: list[TraceEvent],
     total_runs: int,
+    config: ScoringConfig | None = None,
 ) -> list[ScoredPattern]:
     """Score each incident pattern and return a sorted list (highest first)."""
+    cfg = config or ScoringConfig()
+
     scored: list[ScoredPattern] = []
     timeline = _build_agent_timeline(all_events)
     ordered_runs = _ordered_run_ids(all_events)
@@ -252,22 +256,23 @@ def score_patterns(
         freq_norm = pattern.frequency / max_freq
         frequency_score = freq_norm * 10.0
 
-        # Severity: base weight from classification table
-        base_weight = CLASSIFICATION_WEIGHTS.get(
-            pattern.failure_classification, 0.3
-        )
+        # Severity: base weight from configured table
+        base_weight = cfg.weights.get(pattern.failure_classification, 0.3)
 
         # Recovery dynamics
-        recovery = _compute_recovery_stats(pattern, timeline)
+        recovery = _compute_recovery_stats(pattern, timeline, cfg.recovery_window)
 
         # Apply no-recovery multiplier when recovery rate is zero
         recovery_multiplier = (
-            1.0 if recovery.recovery_rate > 0 else NO_RECOVERY_MULTIPLIER
+            1.0 if recovery.recovery_rate > 0 else cfg.no_recovery_multiplier
         )
         severity_score = base_weight * 10.0 * recovery_multiplier
 
-        # Final composite: weighted sum
-        final_score = (frequency_score * 0.4) + (severity_score * 0.6)
+        # Final composite: configurable weighted sum
+        final_score = (
+            frequency_score * cfg.frequency_weight
+            + severity_score * cfg.severity_weight
+        )
 
         scored.append(
             ScoredPattern(

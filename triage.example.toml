@@ -1,0 +1,44 @@
+# Example agent-triage configuration.
+#
+# Copy this to triage.toml in your working directory, or pass via:
+#   triage runs/*.ndjson --config /path/to/triage.toml
+#   triage-serve --config /path/to/triage.toml
+#
+# All sections are optional; missing values fall back to sensible defaults.
+
+[scoring]
+# How many turns after a failure to look for a recovering success.
+recovery_window = 3
+
+# Multiplier applied when zero occurrences recovered (gets-stuck signal).
+no_recovery_multiplier = 1.5
+
+# Composite score weighting: must sum to 1.0 (we don't enforce, but it's
+# semantically meaningful).
+frequency_weight = 0.4
+severity_weight = 0.6
+
+# Per-classification base severity weights (0.0 to 1.0). Unspecified
+# classifications fall back to the built-in defaults.
+[scoring.weights]
+coordination_failure = 1.0
+agent_error = 0.7
+information_lag = 0.5
+environment_constraint = 0.2
+unclassified = 0.3
+
+[storage]
+# Path to the SQLite file. Use ":memory:" for an ephemeral in-memory store
+# (good for one-off CLI runs; bad for triage-serve since you'd lose state
+# on restart).
+db_path = "./triage.db"
+
+[alerting]
+# Slack-compatible incoming webhook URL. Leave commented out to disable.
+# webhook_url = "https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXX"
+
+# Fire when a pattern's final_score crosses this value.
+threshold = 10.0
+
+# Don't refire for the same pattern within this many seconds.
+cooldown_seconds = 3600
