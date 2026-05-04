@@ -1,4 +1,10 @@
-"""analyst.py - LLM-powered root-cause narratives via the Anthropic API."""
+"""analyst.py - LLM-powered root-cause narratives.
+
+The implementation calls the ``anthropic`` SDK because that's the
+provider we ship a built-in adapter for. Swapping providers is a matter
+of replacing this module — the rest of the pipeline only consumes
+``AnalysisResult`` objects.
+"""
 
 from __future__ import annotations
 
@@ -109,7 +115,7 @@ def analyze_patterns(
 ) -> dict[str, AnalysisResult]:
     """Analyze up to ``top_n`` patterns concurrently and return results keyed by pattern_id.
 
-    The Anthropic SDK call is synchronous, so we fan out across worker
+    The underlying SDK call is synchronous, so we fan out across worker
     threads. With prompt caching on the system prompt, the first request
     primes the cache and subsequent requests hit it in parallel.
     """

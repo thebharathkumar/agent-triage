@@ -65,7 +65,7 @@ def main() -> None:
     "--api-key",
     default=None,
     envvar="ANTHROPIC_API_KEY",
-    help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
+    help="API key for the LLM provider (defaults to ANTHROPIC_API_KEY env var).",
     show_envvar=True,
 )
 @click.option(
