@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # Re-verify the full quality bar before publishing — never publish a broken release.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]" mypy
+
+      - name: Test
+        run: pytest --cov=triage --cov-fail-under=90
+
+      - name: Lint
+        run: pip install ruff && ruff check src/triage tests
+
+      - name: Type check
+        run: mypy src/triage
+
+  build-and-publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/agent-triage
+    permissions:
+      id-token: write  # required for PyPI Trusted Publishing
+      contents: write  # required to upload assets to the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: pip install build
+
+      - name: Build sdist + wheel
+        run: python -m build
+
+      - name: Verify built artifacts
+        run: |
+          ls -lh dist/
+          pip install twine
+          twine check dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -1,0 +1,19 @@
+services:
+  triage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-triage:latest
+    container_name: agent-triage
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Optional: enable LLM root-cause narratives
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/events/count')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

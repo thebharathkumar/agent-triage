@@ -43,7 +43,7 @@ from triage.scorer import score_patterns
     help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
     show_envvar=True,
 )
-@click.version_option(package_name="triage")
+@click.version_option(package_name="agent-triage")
 def main(
     files: tuple[Path, ...],
     output: Path | None,
