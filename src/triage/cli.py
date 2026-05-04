@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from triage.config import TriageConfig
 from triage.grouper import group_events
 from triage.loader import load_files
 from triage.reporter import build_report
@@ -43,6 +44,13 @@ from triage.scorer import score_patterns
     help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
     show_envvar=True,
 )
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a triage.toml config file (overrides scoring weights, etc.).",
+)
 @click.version_option(package_name="agent-triage")
 def main(
     files: tuple[Path, ...],
@@ -50,6 +58,7 @@ def main(
     top: int,
     ai_analysis: bool,
     api_key: str | None,
+    config_path: Path | None,
 ) -> None:
     """Analyze agent trace files and produce a morning severity report.
 
@@ -78,13 +87,15 @@ def main(
         click.echo("No events loaded. Check your input files.", err=True)
         sys.exit(1)
 
+    cfg = TriageConfig.from_file(config_path) if config_path else TriageConfig.default()
+
     patterns = group_events(result.events)
 
     # Count distinct run IDs
     run_ids = {e.run_id for e in result.events}
     total_runs = len(run_ids)
 
-    scored = score_patterns(patterns, result.events, total_runs)
+    scored = score_patterns(patterns, result.events, total_runs, config=cfg.scoring)
 
     analyses = None
     if ai_analysis:
