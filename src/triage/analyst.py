@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import os
 from dataclasses import dataclass
 
@@ -104,9 +105,20 @@ def analyze_patterns(
     top_n: int = 3,
     *,
     api_key: str | None = None,
+    max_workers: int = 4,
 ) -> dict[str, AnalysisResult]:
-    """Analyze up to ``top_n`` patterns and return results keyed by pattern_id."""
-    results: dict[str, AnalysisResult] = {}
-    for sp in scored[:top_n]:
-        results[sp.pattern.pattern_id] = analyze_pattern(sp, api_key=api_key)
-    return results
+    """Analyze up to ``top_n`` patterns concurrently and return results keyed by pattern_id.
+
+    The Anthropic SDK call is synchronous, so we fan out across worker
+    threads. With prompt caching on the system prompt, the first request
+    primes the cache and subsequent requests hit it in parallel.
+    """
+    targets = scored[:top_n]
+    if not targets:
+        return {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        analyses = list(
+            ex.map(lambda sp: analyze_pattern(sp, api_key=api_key), targets)
+        )
+    return {sp.pattern.pattern_id: result for sp, result in zip(targets, analyses, strict=True)}

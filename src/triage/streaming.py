@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ class EventBus:
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
-    async def subscribe(self) -> AsyncIterator[dict[str, Any]]:
+    async def subscribe(self) -> AsyncGenerator[dict[str, Any], None]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=self._queue_size)
         self._subscribers.append(queue)
         try:

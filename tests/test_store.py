@@ -146,3 +146,30 @@ class TestTimeSeries:
         s = TraceStore(":memory:")
         s.add_events([make_event(action_succeeded=False, failure_classification="agent_error")])
         assert s.daily_severity_counts(days=7) == []
+
+
+class TestRetention:
+    def _dated(self, eid: str, days_ago: int):
+        ev = make_event(event_id=eid)
+        ev.timestamp = _ts(days_ago)
+        return ev
+
+    def test_delete_older_than_drops_old_events(self):
+        s = TraceStore(":memory:")
+        s.add_events([self._dated("old", 40), self._dated("new", 1)])
+        deleted = s.delete_older_than(30)
+        assert deleted == 1
+        assert s.count() == 1
+
+    def test_delete_older_than_keeps_undated_events(self):
+        s = TraceStore(":memory:")
+        undated = make_event(event_id="no_ts")
+        s.add_events([self._dated("old", 40), undated])
+        s.delete_older_than(30)
+        assert s.count() == 1  # undated event survives
+
+    def test_delete_older_than_zero_match_returns_zero(self):
+        s = TraceStore(":memory:")
+        s.add_events([self._dated("recent", 1)])
+        assert s.delete_older_than(30) == 0
+        assert s.count() == 1

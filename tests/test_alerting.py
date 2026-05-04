@@ -26,15 +26,15 @@ def _make_high_severity_pattern():
 
 
 class TestAlerterDisabled:
-    def test_no_webhook_returns_empty(self):
+    async def test_no_webhook_returns_empty(self):
         alerter = Alerter(AlertConfig(webhook_url=None))
         scored = _make_high_severity_pattern()
-        assert alerter.maybe_alert(scored) == []
+        assert await alerter.maybe_alert(scored) == []
 
 
 class TestAlerterFiring:
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_fires_when_above_threshold(self, mock_urlopen):
+    async def test_fires_when_above_threshold(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: mock_resp
         mock_resp.__exit__ = lambda *a: None
@@ -47,25 +47,25 @@ class TestAlerterFiring:
             cooldown_seconds=0,
         ))
         scored = _make_high_severity_pattern()
-        fired = alerter.maybe_alert(scored)
+        fired = await alerter.maybe_alert(scored)
 
         assert len(fired) == 1
         assert mock_urlopen.called
 
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_does_not_fire_below_threshold(self, mock_urlopen):
+    async def test_does_not_fire_below_threshold(self, mock_urlopen):
         alerter = Alerter(AlertConfig(
             webhook_url="https://example.com/hook",
             threshold=999.0,
         ))
         scored = _make_high_severity_pattern()
-        fired = alerter.maybe_alert(scored)
+        fired = await alerter.maybe_alert(scored)
 
         assert fired == []
         assert not mock_urlopen.called
 
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_cooldown_suppresses_repeat(self, mock_urlopen):
+    async def test_cooldown_suppresses_repeat(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: mock_resp
         mock_resp.__exit__ = lambda *a: None
@@ -78,14 +78,14 @@ class TestAlerterFiring:
             cooldown_seconds=3600,
         ))
         scored = _make_high_severity_pattern()
-        first = alerter.maybe_alert(scored)
-        second = alerter.maybe_alert(scored)
+        first = await alerter.maybe_alert(scored)
+        second = await alerter.maybe_alert(scored)
 
         assert len(first) == 1
         assert second == []  # cooldown active
 
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_zero_cooldown_allows_immediate_refire(self, mock_urlopen):
+    async def test_zero_cooldown_allows_immediate_refire(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: mock_resp
         mock_resp.__exit__ = lambda *a: None
@@ -98,14 +98,14 @@ class TestAlerterFiring:
             cooldown_seconds=0,
         ))
         scored = _make_high_severity_pattern()
-        first = alerter.maybe_alert(scored)
-        second = alerter.maybe_alert(scored)
+        first = await alerter.maybe_alert(scored)
+        second = await alerter.maybe_alert(scored)
 
         assert len(first) == 1
         assert len(second) == 1
 
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_failed_webhook_skips_cooldown_set(self, mock_urlopen):
+    async def test_failed_webhook_skips_cooldown_set(self, mock_urlopen):
         import urllib.error
         mock_urlopen.side_effect = urllib.error.URLError("connection refused")
 
@@ -115,13 +115,13 @@ class TestAlerterFiring:
             cooldown_seconds=3600,
         ))
         scored = _make_high_severity_pattern()
-        fired = alerter.maybe_alert(scored)
+        fired = await alerter.maybe_alert(scored)
 
         # Failed delivery: nothing fired, cooldown not set, would retry next time
         assert fired == []
 
     @patch("triage.alerting.urllib.request.urlopen")
-    def test_payload_includes_pattern_id_and_score(self, mock_urlopen):
+    async def test_payload_includes_pattern_id_and_score(self, mock_urlopen):
         mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: mock_resp
         mock_resp.__exit__ = lambda *a: None
@@ -134,7 +134,7 @@ class TestAlerterFiring:
             cooldown_seconds=0,
         ))
         scored = _make_high_severity_pattern()
-        alerter.maybe_alert(scored)
+        await alerter.maybe_alert(scored)
 
         # Inspect the request body
         call_args = mock_urlopen.call_args

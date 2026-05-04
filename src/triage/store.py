@@ -84,10 +84,51 @@ class TraceStore:
         return len(events)
 
     def all_events(self) -> list[TraceEvent]:
-        rows = self._conn.execute(
-            "SELECT raw_json FROM events ORDER BY inserted_at, turn"
-        ).fetchall()
+        return self.filtered_events()
+
+    def filtered_events(
+        self,
+        *,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        since: datetime.datetime | None = None,
+    ) -> list[TraceEvent]:
+        """Return events matching all non-None filters.
+
+        ``since`` is exclusive on the timestamp column; events without a
+        timestamp are excluded when ``since`` is provided.
+        """
+        clauses: list[str] = []
+        params: list[Any] = []
+        if agent_id is not None:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if since is not None:
+            clauses.append("timestamp IS NOT NULL AND timestamp > ?")
+            params.append(since.isoformat())
+
+        sql = "SELECT raw_json FROM events"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY inserted_at, turn"
+
+        rows = self._conn.execute(sql, params).fetchall()
         return [TraceEvent.model_validate_json(r[0]) for r in rows]
+
+    def distinct_agents(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT agent_id FROM events ORDER BY agent_id"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def distinct_runs(self) -> list[str]:
+        rows = self._conn.execute(
+            "SELECT DISTINCT run_id FROM events ORDER BY run_id"
+        ).fetchall()
+        return [r[0] for r in rows]
 
     def count(self) -> int:
         result = self._conn.execute("SELECT COUNT(*) FROM events").fetchone()
@@ -96,6 +137,22 @@ class TraceStore:
     def clear(self) -> None:
         self._conn.execute("DELETE FROM events")
         self._conn.commit()
+
+    def delete_older_than(self, days: int) -> int:
+        """Drop events whose timestamp is older than ``days`` days. Returns rows deleted.
+
+        Events without a timestamp are kept — we only have a chronology
+        signal for events that actually carried one.
+        """
+        cutoff = (
+            datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=days)
+        ).isoformat()
+        cursor = self._conn.execute(
+            "DELETE FROM events WHERE timestamp IS NOT NULL AND timestamp < ?",
+            (cutoff,),
+        )
+        self._conn.commit()
+        return cursor.rowcount
 
     def daily_severity_counts(self, days: int = 7) -> list[dict[str, Any]]:
         """Return per-day failure counts grouped by classification.

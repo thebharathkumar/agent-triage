@@ -190,6 +190,52 @@ class TestApiReportWithData:
 
 
 # ---------------------------------------------------------------------------
+# /api/report — filters
+# ---------------------------------------------------------------------------
+
+
+class TestApiReportFilters:
+    def _post_event(self, client: TestClient, **overrides) -> None:
+        ev = dict(MINIMAL_EVENT, **overrides)
+        client.post(
+            "/upload",
+            files={"files": ("t.ndjson", _ndjson_bytes([ev]), "application/octet-stream")},
+        )
+
+    def test_filter_by_agent_id(self, client: TestClient):
+        self._post_event(client, event_id="e1", agent_id="A")
+        self._post_event(client, event_id="e2", agent_id="B")
+        data = client.get("/api/report?agent_id=A").json()
+        assert data["total_events"] == 1
+        assert data["filters"]["agent_id"] == "A"
+
+    def test_filter_by_run_id(self, client: TestClient):
+        self._post_event(client, event_id="e1", run_id="run-x")
+        self._post_event(client, event_id="e2", run_id="run-y")
+        data = client.get("/api/report?run_id=run-y").json()
+        assert data["total_events"] == 1
+
+    def test_filter_by_since(self, client: TestClient):
+        self._post_event(client, event_id="old", timestamp="2020-01-01T00:00:00+00:00")
+        self._post_event(client, event_id="new", timestamp="2030-01-01T00:00:00+00:00")
+        data = client.get("/api/report?since=2025-01-01T00:00:00%2B00:00").json()
+        assert data["total_events"] == 1
+
+    def test_invalid_since_returns_400(self, client: TestClient):
+        self._post_event(client, event_id="e1")
+        r = client.get("/api/report?since=not-a-timestamp")
+        assert r.status_code == 400
+
+    def test_filters_endpoint_returns_distinct_values(self, client: TestClient):
+        self._post_event(client, event_id="e1", agent_id="A", run_id="r1")
+        self._post_event(client, event_id="e2", agent_id="B", run_id="r1")
+        self._post_event(client, event_id="e3", agent_id="A", run_id="r2")
+        data = client.get("/api/filters").json()
+        assert sorted(data["agents"]) == ["A", "B"]
+        assert sorted(data["runs"]) == ["r1", "r2"]
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/events
 # ---------------------------------------------------------------------------
 
@@ -432,12 +478,60 @@ class TestApiConfig:
 
 class TestSseStream:
     def test_stream_route_registered(self, client: TestClient):
-        # FastAPI's TestClient hangs on never-ending SSE responses, so
-        # we verify the route is wired up rather than driving the stream.
-        # End-to-end pub/sub is covered by triage.streaming unit tests.
         from triage.server import app
         paths = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/api/stream" in paths
+
+    async def test_stream_delivers_publish(self, clean_store, monkeypatch):
+        """Publish flows through the route handler's SSE generator end-to-end.
+
+        Drives the route's StreamingResponse iterator directly rather than
+        going over HTTP — httpx.ASGITransport buffers SSE chunks in ways
+        that deadlock a true HTTP loopback test. The pub/sub path
+        (subscribe, publish, keep-alive timeout, disconnect check) is
+        exercised exactly as in production.
+        """
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from triage import server as server_mod
+        from triage.streaming import get_bus
+
+        monkeypatch.setattr(server_mod, "_SSE_KEEPALIVE_SECONDS", 0.1)
+
+        request = AsyncMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        response = await server_mod.stream(request)
+        body_iter = response.body_iterator
+
+        chunks: list[str] = [await body_iter.__anext__()]  # initial ping
+
+        async def consume_until_data() -> None:
+            async for chunk in body_iter:
+                text = chunk if isinstance(chunk, str) else chunk.decode()
+                chunks.append(text)
+                if '"value": 42' in text:
+                    return
+
+        consumer = asyncio.create_task(consume_until_data())
+
+        bus = get_bus()
+        for _ in range(50):
+            if bus.subscriber_count > 0:
+                break
+            await asyncio.sleep(0.01)
+        assert bus.subscriber_count > 0, "subscriber never registered"
+        await bus.publish({"type": "test", "value": 42})
+
+        await asyncio.wait_for(consumer, timeout=1.0)
+
+        request.is_disconnected = AsyncMock(return_value=True)
+        await body_iter.aclose()
+
+        body = "".join(chunks)
+        assert "event: ping" in body
+        assert '"value": 42' in body
 
 
 # ---------------------------------------------------------------------------

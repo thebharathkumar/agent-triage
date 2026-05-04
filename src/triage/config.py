@@ -53,6 +53,7 @@ class ScoringConfig:
 @dataclass
 class StorageConfig:
     db_path: str = ":memory:"
+    retention_days: int | None = None  # None = keep forever
 
 
 @dataclass

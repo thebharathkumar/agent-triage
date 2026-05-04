@@ -33,6 +33,11 @@ unclassified = 0.3
 # on restart).
 db_path = "./triage.db"
 
+# Drop events older than this many days on every ingest. Omit (or set to
+# 0/null) to keep every event forever — convenient for short-lived demos
+# but unbounded in long-running deployments.
+# retention_days = 30
+
 [alerting]
 # Slack-compatible incoming webhook URL. Leave commented out to disable.
 # webhook_url = "https://hooks.slack.com/services/T0000/B0000/XXXXXXXXXXXXXXXX"

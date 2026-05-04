@@ -6,7 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/agent-triage.svg)](https://pypi.org/project/agent-triage/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](#development)
 [![mypy: strict](https://img.shields.io/badge/mypy-strict-blue.svg)](https://mypy-lang.org/)
 
 `agent-triage` ingests trace files from multi-agent systems (NDJSON or OpenTelemetry) and produces a ranked "what actually needs your attention this morning" severity report. It ships a CLI, a web dashboard, an OTLP receiver, and optional LLM-generated root-cause narratives.
@@ -37,7 +37,7 @@ The signal you actually need at 9 AM is not "here are 847 events from last night
 - **Webhook alerting** — fire Slack-compatible notifications when a pattern crosses your severity threshold
 - **Docker-ready** — `docker compose up` and you have a dashboard
 - **PyPI-published** — `pip install agent-triage`
-- **Production quality** — 145+ tests, 91%+ coverage, mypy strict, ruff clean
+- **Production quality** — 220+ tests, 93%+ coverage, mypy strict, ruff clean
 
 ---
 
@@ -540,7 +540,7 @@ mypy src/triage                                 # type check
 
 Quality gates enforced in CI:
 
-- 100+ tests, 92%+ coverage
+- 220+ tests, 93%+ coverage
 - `ruff check` clean
 - `mypy --strict` clean
 

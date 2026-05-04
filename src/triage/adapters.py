@@ -37,6 +37,30 @@ def _read_file(path: Path) -> tuple[str, list[str]]:
         return "", [f"{path}: cannot read file - {exc}"]
 
 
+# Canonical OTLP attribute keys that map onto TraceEvent fields. Listed
+# once here so the file-format adapter (OTelAdapter) and the HTTP
+# receiver (server._span_to_event) cannot silently drift on which
+# attributes they recognise.
+OTLP_AGENT_ID_KEYS: tuple[str, ...] = ("agent.id", "agent_id")
+OTLP_RUN_ID_KEYS: tuple[str, ...] = ("run.id", "run_id")
+OTLP_TOOL_NAME_KEYS: tuple[str, ...] = ("action.tool", "tool_name")
+OTLP_SUCCEEDED_KEY = "action.succeeded"
+OTLP_CLASSIFICATION_KEY = "failure.classification"
+OTLP_DIVERGENCE_KEY = "divergence.fields"
+OTLP_TURN_KEY = "turn"
+OTLP_LATENCY_LLM_KEY = "latency.llm_ms"
+OTLP_LATENCY_TOOL_KEY = "latency.tool_ms"
+
+
+def _first_attr(attrs: dict[str, Any], keys: tuple[str, ...]) -> Any:
+    """Return the first non-None value for any key in ``keys``, else None."""
+    for k in keys:
+        v = attrs.get(k)
+        if v is not None:
+            return v
+    return None
+
+
 @runtime_checkable
 class TraceAdapter(Protocol):
     """Plugin contract for parsing a trace file into TraceEvents."""
@@ -136,18 +160,24 @@ class OTelAdapter:
 
         return TraceEvent(
             event_id=str(span.get("span_id") or span.get("spanId") or ""),
-            run_id=str(span.get("trace_id") or span.get("traceId") or ""),
-            turn=int(attrs.get("turn", 0)),
-            agent_id=str(attrs.get("agent.id") or attrs.get("agent_id") or ""),
+            run_id=str(
+                _first_attr(attrs, OTLP_RUN_ID_KEYS)
+                or span.get("trace_id")
+                or span.get("traceId")
+                or ""
+            ),
+            turn=int(attrs.get(OTLP_TURN_KEY, 0)),
+            agent_id=str(_first_attr(attrs, OTLP_AGENT_ID_KEYS) or ""),
             latency_ms=Latency(),
             action_taken=ActionTaken(
-                tool_name=str(span.get("name", "")),
+                tool_name=str(_first_attr(attrs, OTLP_TOOL_NAME_KEYS) or span.get("name", "")),
                 tool_input=attrs.get("tool_input", {}) or {},
             ),
             action_succeeded=status_code in self._SUCCESS_STATUS_CODES,
             divergence_fields=list(attrs.get("divergence_fields", []) or []),
             divergence_age=dict(attrs.get("divergence_age", {}) or {}),
-            failure_classification=attrs.get("failure_classification"),
+            failure_classification=attrs.get(OTLP_CLASSIFICATION_KEY)
+            or attrs.get("failure_classification"),
             usage=Usage(),
             message_context={},
         )

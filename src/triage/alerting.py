@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -20,20 +21,24 @@ class Alerter:
     Each ``maybe_alert()`` call inspects scored patterns and fires the
     configured webhook for any whose ``final_score`` exceeds
     ``config.threshold``, subject to a per-pattern cooldown so the same
-    pattern doesn't spam during a continuous incident.
+    pattern doesn't spam during a continuous incident. Sends run in
+    worker threads so the caller's event loop is never blocked, and
+    multiple eligible alerts in one batch fan out concurrently.
     """
 
     def __init__(self, config: AlertConfig) -> None:
         self.config = config
         self._last_fired: dict[str, float] = {}
 
-    def maybe_alert(self, scored: list[ScoredPattern]) -> list[dict[str, object]]:
+    async def maybe_alert(
+        self, scored: list[ScoredPattern]
+    ) -> list[dict[str, object]]:
         """Send alerts for patterns above threshold; return list of fired alerts."""
         if not self.config.webhook_url:
             return []
 
         now = time.time()
-        fired: list[dict[str, object]] = []
+        candidates: list[ScoredPattern] = []
         for sp in scored:
             if sp.final_score < self.config.threshold:
                 continue
@@ -41,17 +46,27 @@ class Alerter:
             last = self._last_fired.get(pid, 0.0)
             if now - last < self.config.cooldown_seconds:
                 continue
+            candidates.append(sp)
 
-            ok = self._send(sp)
-            if ok:
-                self._last_fired[pid] = now
-                fired.append(
-                    {
-                        "pattern_id": pid,
-                        "score": sp.final_score,
-                        "delivered": True,
-                    }
-                )
+        if not candidates:
+            return []
+
+        results = await asyncio.gather(
+            *(asyncio.to_thread(self._send, sp) for sp in candidates)
+        )
+
+        fired: list[dict[str, object]] = []
+        for sp, ok in zip(candidates, results, strict=True):
+            if not ok:
+                continue
+            self._last_fired[sp.pattern.pattern_id] = now
+            fired.append(
+                {
+                    "pattern_id": sp.pattern.pattern_id,
+                    "score": sp.final_score,
+                    "delivered": True,
+                }
+            )
         return fired
 
     def _send(self, sp: ScoredPattern) -> bool:
