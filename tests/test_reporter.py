@@ -75,6 +75,12 @@ def _make_scored(
     frequency: int = 3,
     recovery_rate: float = 0.0,
     divergence_fields: list[str] | None = None,
+    median_recovery_latency: float | None = None,
+    unrecovered_tail_count: int = 0,
+    confidence: float | None = None,
+    runs_seen_in: int = 1,
+    runs_total: int = 1,
+    trend: str = "insufficient data",
 ) -> ScoredPattern:
     events = [
         make_event(
@@ -103,6 +109,12 @@ def _make_scored(
         severity_score=7.0,
         recovery_rate=recovery_rate,
         final_score=5.4,
+        confidence=confidence if confidence is not None else min(1.0, frequency / 5),
+        median_recovery_latency=median_recovery_latency,
+        unrecovered_tail_count=unrecovered_tail_count,
+        runs_seen_in=runs_seen_in,
+        runs_total=runs_total,
+        trend=trend,
     )
 
 
@@ -139,6 +151,43 @@ def test_explain_unclassified():
     assert "Unclassified" in text
 
 
+def test_explain_mentions_median_latency_when_recovered():
+    sp = _make_scored(recovery_rate=0.5, median_recovery_latency=2.0)
+    text = _explain(sp, total_runs=3)
+    assert "median latency" in text.lower()
+    assert "2" in text
+
+
+def test_explain_mentions_tail_risk_when_nonzero():
+    sp = _make_scored(
+        recovery_rate=0.5,
+        median_recovery_latency=1.0,
+        unrecovered_tail_count=2,
+    )
+    text = _explain(sp, total_runs=3)
+    assert "tail" in text.lower()
+    assert "2" in text
+
+
+def test_explain_mentions_recurrence_when_multi_run():
+    sp = _make_scored(runs_seen_in=7, runs_total=12, trend="stable")
+    text = _explain(sp, total_runs=12)
+    assert "7/12" in text
+    assert "stable" in text
+
+
+def test_explain_omits_recurrence_for_single_run():
+    sp = _make_scored(runs_seen_in=1, runs_total=1, trend="insufficient data")
+    text = _explain(sp, total_runs=1)
+    assert "Appeared in" not in text
+
+
+def test_explain_flags_new_pattern():
+    sp = _make_scored(runs_seen_in=2, runs_total=6, trend="new")
+    text = _explain(sp, total_runs=6)
+    assert "newly-emerging" in text or "new" in text.lower()
+
+
 # ---------------------------------------------------------------------------
 # CLI --top validation
 # ---------------------------------------------------------------------------
@@ -169,7 +218,7 @@ MINIMAL_EVENT: dict = {
 def test_top_zero_is_rejected(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "0", p])
+    result = runner.invoke(main, ["report", "--top", "0", p])
     assert result.exit_code != 0
     assert "0" in result.output or "invalid" in result.output.lower()
 
@@ -177,14 +226,14 @@ def test_top_zero_is_rejected(tmp_path):
 def test_top_negative_is_rejected(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "-1", p])
+    result = runner.invoke(main, ["report", "--top", "-1", p])
     assert result.exit_code != 0
 
 
 def test_top_one_produces_single_incident(tmp_path):
     runner = CliRunner()
     p = _write_ndjson(tmp_path, [MINIMAL_EVENT])
-    result = runner.invoke(main, ["--top", "1", p])
+    result = runner.invoke(main, ["report", "--top", "1", p])
     assert result.exit_code == 0
     assert "# Triage Report" in result.output
     assert result.output.count("## #") == 1
