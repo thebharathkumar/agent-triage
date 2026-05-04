@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import math
 
+from triage.analyst import AnalysisResult
 from triage.scorer import RECOVERY_WINDOW, ScoredPattern
 
 # Human-readable descriptions for each failure classification
@@ -106,6 +107,7 @@ def build_report(
     total_patterns: int,
     source_files: list[str],
     top_n: int = 3,
+    analyses: dict[str, AnalysisResult] | None = None,
 ) -> str:
     now = datetime.datetime.now(tz=datetime.UTC)
     date_str = now.strftime("%Y-%m-%d %H:%M UTC")
@@ -155,6 +157,12 @@ def build_report(
         lines.append("")
         lines.append(_explain(sp, total_runs))
         lines.append("")
+        if analyses and p.pattern_id in analyses:
+            result = analyses[p.pattern_id]
+            lines.append("**AI Root-Cause Analysis:**")
+            lines.append("")
+            lines.append(f"> {result.narrative}")
+            lines.append("")
         next_action = NEXT_ACTIONS.get(p.failure_classification, NEXT_ACTIONS["unclassified"])
         lines.append(f"**Suggested next action:** {next_action}")
         lines.append("")

@@ -30,8 +30,27 @@ from triage.scorer import score_patterns
     show_default=True,
     help="Number of top incidents to include in the report.",
 )
+@click.option(
+    "--ai-analysis",
+    is_flag=True,
+    default=False,
+    help="Enrich each top incident with a Claude-generated root-cause narrative.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    envvar="ANTHROPIC_API_KEY",
+    help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
+    show_envvar=True,
+)
 @click.version_option(package_name="triage")
-def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
+def main(
+    files: tuple[Path, ...],
+    output: Path | None,
+    top: int,
+    ai_analysis: bool,
+    api_key: str | None,
+) -> None:
     """Analyze agent trace files and produce a morning severity report.
 
     Pass one or more NDJSON trace files as arguments. Glob expansion is
@@ -67,12 +86,24 @@ def main(files: tuple[Path, ...], output: Path | None, top: int) -> None:
 
     scored = score_patterns(patterns, result.events, total_runs)
 
+    analyses = None
+    if ai_analysis:
+        from triage.analyst import analyze_patterns
+
+        try:
+            click.echo("Running AI root-cause analysis...", err=True)
+            analyses = analyze_patterns(scored, top_n=top, api_key=api_key)
+        except RuntimeError as exc:
+            click.echo(f"[ai-analysis] {exc}", err=True)
+            sys.exit(1)
+
     report = build_report(
         scored=scored,
         total_runs=total_runs,
         total_patterns=len(patterns),
         source_files=[str(f) for f in files],
         top_n=top,
+        analyses=analyses,
     )
 
     if output:
