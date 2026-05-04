@@ -7,6 +7,7 @@ import math
 from typing import TYPE_CHECKING
 
 from triage.analyst import AnalysisResult
+from triage.comparer import _pct_change
 from triage.scorer import RECOVERY_WINDOW, TAIL_RISK_WINDOW, ScoredPattern
 
 if TYPE_CHECKING:
@@ -45,6 +46,10 @@ NEXT_ACTIONS: dict[str, str] = {
 }
 
 
+def _clamp_rate(rate: float) -> float:
+    return max(0.0, min(rate, 1.0))
+
+
 def _fmt_pct(rate: float) -> str:
     """Format a rate as a truncated integer percentage string.
 
@@ -52,7 +57,7 @@ def _fmt_pct(rate: float) -> str:
     are capped at 99% after truncation, so this only returns 100% when the
     clamped input is exactly 1.0.
     """
-    clamped = max(0.0, min(rate, 1.0))
+    clamped = _clamp_rate(rate)
     pct = math.floor(clamped * 100 + 1e-9)
     if clamped < 1.0:
         pct = min(pct, 99)
@@ -60,7 +65,7 @@ def _fmt_pct(rate: float) -> str:
 
 
 def _recovery_bar(rate: float) -> str:
-    clamped = max(0.0, min(rate, 1.0))
+    clamped = _clamp_rate(rate)
     if clamped == 0.0:
         filled = 0
     else:
@@ -272,8 +277,6 @@ def build_comparison_report(
     lines.append("")
 
     if comparison.before_summary is not None and comparison.after_summary is not None:
-        from triage.comparer import _pct_change as _pct_change_fn
-
         b = comparison.before_summary
         a = comparison.after_summary
         lines.append("## Score Summary")
@@ -282,22 +285,22 @@ def build_comparison_report(
         lines.append("|---|---|---|---|")
         lines.append(
             f"| Distinct incident patterns | {b.pattern_count} | "
-            f"{a.pattern_count} | {_pct_change_fn(b.pattern_count, a.pattern_count)} |"
+            f"{a.pattern_count} | {_pct_change(b.pattern_count, a.pattern_count)} |"
         )
         lines.append(
             f"| Failure events | {b.failure_event_count} | "
             f"{a.failure_event_count} | "
-            f"{_pct_change_fn(b.failure_event_count, a.failure_event_count)} |"
+            f"{_pct_change(b.failure_event_count, a.failure_event_count)} |"
         )
         lines.append(
             f"| Unrecovered events | {b.unrecovered_event_count} | "
             f"{a.unrecovered_event_count} | "
-            f"{_pct_change_fn(b.unrecovered_event_count, a.unrecovered_event_count)} |"
+            f"{_pct_change(b.unrecovered_event_count, a.unrecovered_event_count)} |"
         )
         lines.append(
             f"| Coordination failure events | {b.coordination_failure_count} | "
             f"{a.coordination_failure_count} | "
-            f"{_pct_change_fn(b.coordination_failure_count, a.coordination_failure_count)} |"
+            f"{_pct_change(b.coordination_failure_count, a.coordination_failure_count)} |"
         )
         lines.append(
             f"| Top final score | {b.top_final_score:.2f} | "
@@ -383,7 +386,6 @@ def build_comparison_report(
         lines.append("| Pattern | Before | After | Δ frequency |")
         lines.append("|---|---|---|---|")
         for before_sp, after_sp in comparison.persisting_patterns:
-            from triage.comparer import _pct_change
             delta = _pct_change(
                 before_sp.pattern.frequency, after_sp.pattern.frequency
             )

@@ -29,6 +29,14 @@ from typing import Any, ClassVar, Protocol, runtime_checkable
 from triage.loader import ActionTaken, Latency, TraceEvent, Usage
 
 
+def _read_file(path: Path) -> tuple[str, list[str]]:
+    """Read file text; on OSError return ('', [error_string])."""
+    try:
+        return path.read_text(encoding="utf-8"), []
+    except OSError as exc:
+        return "", [f"{path}: cannot read file - {exc}"]
+
+
 @runtime_checkable
 class TraceAdapter(Protocol):
     """Plugin contract for parsing a trace file into TraceEvents."""
@@ -54,11 +62,8 @@ class NDJSONAdapter:
 
     def load(self, path: Path) -> tuple[list[TraceEvent], list[str]]:
         events: list[TraceEvent] = []
-        errors: list[str] = []
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            errors.append(f"{path}: cannot read file - {exc}")
+        text, errors = _read_file(path)
+        if errors:
             return events, errors
 
         for lineno, raw_line in enumerate(text.splitlines(), start=1):
@@ -102,11 +107,8 @@ class OTelAdapter:
 
     def load(self, path: Path) -> tuple[list[TraceEvent], list[str]]:
         events: list[TraceEvent] = []
-        errors: list[str] = []
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            errors.append(f"{path}: cannot read file - {exc}")
+        text, errors = _read_file(path)
+        if errors:
             return events, errors
 
         try:

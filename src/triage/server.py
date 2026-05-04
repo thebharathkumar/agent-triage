@@ -18,16 +18,26 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from triage.alerting import Alerter
 from triage.config import TriageConfig
-from triage.grouper import group_events
+from triage.grouper import IncidentPattern, group_events
 from triage.loader import ActionTaken, Latency, LoadResult, TraceEvent, Usage, load_files
 from triage.reporter import CLASSIFICATION_LABELS, NEXT_ACTIONS, build_report
-from triage.scorer import score_patterns
+from triage.scorer import ScoredPattern, score_patterns
 from triage.store import get_store, reset_store
 from triage.streaming import get_bus
 
 # ---------------------------------------------------------------------------
 # Persistent event store backed by SQLite (see triage.store)
 # ---------------------------------------------------------------------------
+
+
+def _compute_scored(
+    events: list[TraceEvent],
+) -> tuple[list[IncidentPattern], list[ScoredPattern], int]:
+    """Run grouper + scorer; return (patterns, scored, total_runs)."""
+    patterns = group_events(events)
+    total_runs = len({e.run_id for e in events})
+    scored = score_patterns(patterns, events, total_runs, config=get_config().scoring)
+    return patterns, scored, total_runs
 
 
 def _clear_store() -> None:
@@ -566,13 +576,7 @@ async def api_report(top_n: int = 10) -> dict[str, Any]:
             "alerts_fired": [],
         }
 
-    cfg = get_config()
-    patterns = group_events(events)
-    run_ids = {e.run_id for e in events}
-    total_runs = len(run_ids)
-    scored = score_patterns(patterns, events, total_runs, config=cfg.scoring)
-
-    # Fire alerts for any patterns over threshold (cooldown-protected).
+    patterns, scored, total_runs = _compute_scored(events)
     alerts_fired = get_alerter().maybe_alert(scored)
 
     pattern_data: list[dict[str, Any]] = []
@@ -606,7 +610,7 @@ async def api_report(top_n: int = 10) -> dict[str, Any]:
         "total_events": len(events),
         "total_patterns": len(patterns),
         "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d %H:%M UTC"),
-        "source_count": len({e.run_id for e in events}),
+        "source_count": total_runs,
         "patterns": pattern_data,
         "alerts_fired": alerts_fired,
     }
@@ -619,13 +623,10 @@ async def api_report_markdown(top_n: int = 3) -> JSONResponse:
     if not events:
         return JSONResponse({"markdown": "No data loaded yet."})
 
-    cfg = get_config()
-    patterns = group_events(events)
-    run_ids = {e.run_id for e in events}
-    scored = score_patterns(patterns, events, len(run_ids), config=cfg.scoring)
+    patterns, scored, total_runs = _compute_scored(events)
     md = build_report(
         scored=scored,
-        total_runs=len(run_ids),
+        total_runs=total_runs,
         total_patterns=len(patterns),
         source_files=["dashboard-upload"],
         top_n=top_n,
