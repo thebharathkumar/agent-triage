@@ -88,6 +88,26 @@ class TestBuildReport:
         report = self._make_report()
         assert "Suggested next action" in report
 
+    def test_report_contains_confidence_row(self):
+        report = self._make_report()
+        assert "Confidence" in report
+
+    def test_report_contains_recovery_latency_row(self):
+        report = self._make_report()
+        assert "Recovery Latency" in report
+
+    def test_report_contains_tail_risk_row(self):
+        report = self._make_report()
+        assert "Tail Risk" in report
+
+    def test_report_contains_appeared_in_row(self):
+        report = self._make_report()
+        assert "Appeared in" in report
+
+    def test_report_contains_trend_row(self):
+        report = self._make_report()
+        assert "Trend" in report
+
     def test_empty_scored_shows_no_incidents_message(self):
         report = build_report(
             scored=[],
@@ -157,26 +177,26 @@ class TestCLI:
 
     def test_cli_no_args_exits_nonzero(self):
         runner = CliRunner()
-        result = runner.invoke(main, [])
+        result = runner.invoke(main, ["report"])
         assert result.exit_code != 0
 
     def test_cli_valid_file_exits_zero(self, tmp_path: Path):
         p = self._write_ndjson(tmp_path, [MINIMAL_EVENT])
         runner = CliRunner()
-        result = runner.invoke(main, [str(p)])
+        result = runner.invoke(main, ["report", str(p)])
         assert result.exit_code == 0
 
     def test_cli_output_contains_report_header(self, tmp_path: Path):
         p = self._write_ndjson(tmp_path, [MINIMAL_EVENT])
         runner = CliRunner()
-        result = runner.invoke(main, [str(p)])
+        result = runner.invoke(main, ["report", str(p)])
         assert "Triage Report" in result.output
 
     def test_cli_output_flag_writes_file(self, tmp_path: Path):
         p = self._write_ndjson(tmp_path, [MINIMAL_EVENT])
         out = tmp_path / "report.md"
         runner = CliRunner()
-        result = runner.invoke(main, [str(p), "--output", str(out)])
+        result = runner.invoke(main, ["report", str(p), "--output", str(out)])
         assert result.exit_code == 0
         assert out.exists()
         assert "Triage Report" in out.read_text()
@@ -195,7 +215,7 @@ class TestCLI:
         ]
         p = self._write_ndjson(tmp_path, events)
         runner = CliRunner()
-        result = runner.invoke(main, [str(p), "--top", "1"])
+        result = runner.invoke(main, ["report", str(p), "--top", "1"])
         assert result.exit_code == 0
         assert "## #1" in result.output
         assert "## #2" not in result.output
@@ -206,7 +226,7 @@ class TestCLI:
         p2 = tmp_path / "b.ndjson"
         p2.write_text(json.dumps(dict(MINIMAL_EVENT, event_id="e2", run_id="r2")))
         runner = CliRunner()
-        result = runner.invoke(main, [str(p1), str(p2)])
+        result = runner.invoke(main, ["report", str(p1), str(p2)])
         assert result.exit_code == 0
         assert "2 run" in result.output
 
@@ -214,5 +234,5 @@ class TestCLI:
         p = tmp_path / "empty.ndjson"
         p.write_text("")
         runner = CliRunner()
-        result = runner.invoke(main, [str(p)])
+        result = runner.invoke(main, ["report", str(p)])
         assert result.exit_code != 0

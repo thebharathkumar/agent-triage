@@ -72,7 +72,14 @@ def group_events(events: list[TraceEvent]) -> list[IncidentPattern]:
         key = _make_key(event)
         if key not in buckets:
             agent_id, tool_name, classification, div_fields = key
-            pattern_id = f"{agent_id}-{tool_name}-{classification}"
+            # pattern_id includes the divergence-fields signature so that
+            # two failures with identical agent/tool/classification but
+            # different stale-belief fields stay distinguishable across
+            # batches. compare-mode uses pattern_id as the join key, and
+            # collapsing them here would silently merge "new" and
+            # "resolved" patterns into a phantom "persisting" one.
+            div_part = "+".join(sorted(div_fields)) if div_fields else "none"
+            pattern_id = f"{agent_id}-{tool_name}-{classification}-{div_part}"
             buckets[key] = IncidentPattern(
                 pattern_id=pattern_id,
                 agent_id=agent_id,
