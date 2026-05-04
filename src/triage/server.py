@@ -1,35 +1,93 @@
-"""server.py - FastAPI web dashboard and OTLP trace receiver."""
+"""server.py - FastAPI web dashboard, OTLP receiver, SSE stream, alerting."""
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
+import json
+import os
 import uuid
+from pathlib import Path
 from typing import Any
 
 import click
 import uvicorn
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
+from triage.alerting import Alerter
+from triage.config import TriageConfig
 from triage.grouper import group_events
 from triage.loader import ActionTaken, Latency, LoadResult, TraceEvent, Usage, load_files
 from triage.reporter import CLASSIFICATION_LABELS, NEXT_ACTIONS, build_report
 from triage.scorer import score_patterns
+from triage.store import get_store, reset_store
+from triage.streaming import get_bus
 
 # ---------------------------------------------------------------------------
-# In-memory event store
+# Persistent event store backed by SQLite (see triage.store)
 # ---------------------------------------------------------------------------
-
-_store: list[TraceEvent] = []
 
 
 def _clear_store() -> None:
-    _store.clear()
+    """Wipe the store. Tests use this to reset between cases."""
+    get_store().clear()
 
 
 def _add_events(events: list[TraceEvent]) -> None:
-    _store.extend(events)
+    """Persist events and broadcast a 'new events' SSE notification."""
+    if not events:
+        return
+    get_store().add_events(events)
+    bus = get_bus()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    payload = {"type": "events_added", "count": len(events)}
+    if loop is not None:
+        loop.create_task(bus.publish(payload))
+    else:
+        # Synchronous context (e.g. CLI tests): just skip the notification.
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Configuration loaded from TRIAGE_CONFIG env var (set by CLI), plus alerter.
+# ---------------------------------------------------------------------------
+
+_config: TriageConfig | None = None
+_alerter: Alerter | None = None
+
+
+def get_config() -> TriageConfig:
+    global _config
+    if _config is None:
+        path = os.environ.get("TRIAGE_CONFIG")
+        if path and Path(path).exists():
+            _config = TriageConfig.from_file(Path(path))
+        else:
+            _config = TriageConfig.default()
+    return _config
+
+
+def get_alerter() -> Alerter:
+    global _alerter
+    if _alerter is None:
+        _alerter = Alerter(get_config().alerting)
+    return _alerter
+
+
+def reset_runtime() -> None:
+    """Test helper: clear cached config + alerter + store + bus."""
+    global _config, _alerter
+    _config = None
+    _alerter = None
+    reset_store()
+    from triage.streaming import reset_bus
+
+    reset_bus()
 
 
 # ---------------------------------------------------------------------------
@@ -155,11 +213,18 @@ _DASHBOARD_HTML = """\
     <div class="xl:col-span-2 space-y-4" id="patterns-col">
       <p class="text-slate-400">Loading incident patterns...</p>
     </div>
-    <!-- Chart -->
-    <div class="card">
-      <h2 class="font-semibold text-slate-300 mb-4 text-sm uppercase tracking-wide">Severity by Pattern</h2>
-      <canvas id="scoreChart" height="300"></canvas>
-      <p id="chart-empty" class="text-slate-500 text-sm mt-4 hidden">No data yet. Upload a trace file to begin.</p>
+    <!-- Chart column -->
+    <div class="space-y-6">
+      <div class="card">
+        <h2 class="font-semibold text-slate-300 mb-4 text-sm uppercase tracking-wide">Severity by Pattern</h2>
+        <canvas id="scoreChart" height="300"></canvas>
+        <p id="chart-empty" class="text-slate-500 text-sm mt-4 hidden">No data yet. Upload a trace file to begin.</p>
+      </div>
+      <div class="card">
+        <h2 class="font-semibold text-slate-300 mb-4 text-sm uppercase tracking-wide">7-Day Failure Trend</h2>
+        <canvas id="trendChart" height="220"></canvas>
+        <p id="trend-empty" class="text-slate-500 text-sm mt-4 hidden">No timestamped events in the last 7 days yet.</p>
+      </div>
     </div>
   </div>
 
@@ -340,7 +405,78 @@ async function doUpload() {
   }
 }
 
+// --- Time-series trends ---------------------------------------------------
+let trendChart = null;
+
+function fillDayGaps(byCls, days) {
+  const today = new Date();
+  const dates = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setUTCDate(d.getUTCDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const byClsByDate = {};
+  for (const row of byCls) {
+    if (!byClsByDate[row.classification]) byClsByDate[row.classification] = {};
+    byClsByDate[row.classification][row.date] = row.count;
+  }
+  const datasets = Object.keys(byClsByDate).map(cls => ({
+    label: cls,
+    data: dates.map(d => byClsByDate[cls][d] ?? 0),
+    borderColor: CLASSIFICATION_COLOR[cls] || '#6b7280',
+    backgroundColor: (CLASSIFICATION_COLOR[cls] || '#6b7280') + '33',
+    tension: 0.3,
+    fill: true,
+  }));
+  return { dates, datasets };
+}
+
+async function refreshTrends() {
+  try {
+    const res = await fetch('/api/trends?days=7');
+    const data = await res.json();
+    const ctx = document.getElementById('trendChart').getContext('2d');
+    const { dates, datasets } = fillDayGaps(data.by_classification, data.days);
+    if (trendChart) trendChart.destroy();
+    if (!datasets.length) {
+      document.getElementById('trend-empty').classList.remove('hidden');
+      return;
+    }
+    document.getElementById('trend-empty').classList.add('hidden');
+    trendChart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: dates, datasets },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+        scales: {
+          x: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10 } } },
+          y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8' }, beginAtZero: true }
+        }
+      }
+    });
+  } catch(e) { console.warn('trends fetch failed', e); }
+}
+
+// --- Server-Sent Events: auto-refresh on new data ------------------------
+function connectStream() {
+  const es = new EventSource('/api/stream');
+  es.onmessage = (msg) => {
+    try {
+      const data = JSON.parse(msg.data);
+      if (data.type === 'events_added') {
+        clearTimeout(window._refreshTimer);
+        window._refreshTimer = setTimeout(() => { refresh(); refreshTrends(); }, 500);
+      }
+    } catch(e) { /* ignore non-JSON pings */ }
+  };
+  es.onerror = () => { es.close(); setTimeout(connectStream, 5000); };
+}
+
 refresh();
+refreshTrends();
+connectStream();
 </script>
 </body>
 </html>
@@ -364,9 +500,8 @@ async def dashboard() -> HTMLResponse:
 
 @app.post("/upload")
 async def upload_traces(files: list[UploadFile] = File(...)) -> dict[str, Any]:
-    """Upload one or more NDJSON trace files and add them to the in-memory store."""
+    """Upload one or more NDJSON trace files and persist their events."""
     import tempfile
-    from pathlib import Path
 
     paths: list[Path] = []
     tmp_dir = tempfile.mkdtemp()
@@ -417,7 +552,10 @@ async def receive_otlp(request: Request) -> dict[str, Any]:
 @app.get("/api/report")
 async def api_report(top_n: int = 10) -> dict[str, Any]:
     """Run the triage pipeline on stored events and return JSON."""
-    if not _store:
+    store = get_store()
+    events = store.all_events()
+
+    if not events:
         return {
             "total_runs": 0,
             "total_events": 0,
@@ -425,12 +563,17 @@ async def api_report(top_n: int = 10) -> dict[str, Any]:
             "generated_at": datetime.datetime.now(tz=datetime.UTC).isoformat(),
             "source_count": 0,
             "patterns": [],
+            "alerts_fired": [],
         }
 
-    patterns = group_events(_store)
-    run_ids = {e.run_id for e in _store}
+    cfg = get_config()
+    patterns = group_events(events)
+    run_ids = {e.run_id for e in events}
     total_runs = len(run_ids)
-    scored = score_patterns(patterns, _store, total_runs)
+    scored = score_patterns(patterns, events, total_runs, config=cfg.scoring)
+
+    # Fire alerts for any patterns over threshold (cooldown-protected).
+    alerts_fired = get_alerter().maybe_alert(scored)
 
     pattern_data: list[dict[str, Any]] = []
     for rank, sp in enumerate(scored[:top_n], start=1):
@@ -460,23 +603,26 @@ async def api_report(top_n: int = 10) -> dict[str, Any]:
 
     return {
         "total_runs": total_runs,
-        "total_events": len(_store),
+        "total_events": len(events),
         "total_patterns": len(patterns),
         "generated_at": datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d %H:%M UTC"),
-        "source_count": len({e.run_id for e in _store}),
+        "source_count": len({e.run_id for e in events}),
         "patterns": pattern_data,
+        "alerts_fired": alerts_fired,
     }
 
 
 @app.get("/api/report/markdown")
 async def api_report_markdown(top_n: int = 3) -> JSONResponse:
     """Return the full triage report as a Markdown string."""
-    if not _store:
+    events = get_store().all_events()
+    if not events:
         return JSONResponse({"markdown": "No data loaded yet."})
 
-    patterns = group_events(_store)
-    run_ids = {e.run_id for e in _store}
-    scored = score_patterns(patterns, _store, len(run_ids))
+    cfg = get_config()
+    patterns = group_events(events)
+    run_ids = {e.run_id for e in events}
+    scored = score_patterns(patterns, events, len(run_ids), config=cfg.scoring)
     md = build_report(
         scored=scored,
         total_runs=len(run_ids),
@@ -485,6 +631,47 @@ async def api_report_markdown(top_n: int = 3) -> JSONResponse:
         top_n=top_n,
     )
     return JSONResponse({"markdown": md})
+
+
+@app.get("/api/trends")
+async def api_trends(days: int = 7) -> dict[str, Any]:
+    """Per-pattern, per-day failure counts for the last ``days`` days."""
+    store = get_store()
+    return {
+        "days": days,
+        "by_classification": store.daily_severity_counts(days),
+        "by_pattern": store.pattern_daily_counts(days),
+    }
+
+
+@app.get("/api/stream", include_in_schema=False)
+async def stream(request: Request) -> StreamingResponse:
+    """Server-Sent Events endpoint that pushes 'new events' notifications.
+
+    Lets the dashboard refresh automatically when fresh OTLP spans arrive
+    instead of requiring the user to click Refresh.
+    """
+    bus = get_bus()
+
+    async def event_generator() -> Any:
+        # Initial heartbeat so the client knows the connection opened.
+        yield "event: ping\ndata: connected\n\n"
+        try:
+            async for event in bus.subscribe():
+                if await request.is_disconnected():
+                    break
+                yield f"data: {json.dumps(event)}\n\n"
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.delete("/api/events")
@@ -496,7 +683,29 @@ async def clear_events() -> dict[str, str]:
 
 @app.get("/api/events/count")
 async def event_count() -> dict[str, int]:
-    return {"count": len(_store)}
+    return {"count": get_store().count()}
+
+
+@app.get("/api/config")
+async def api_config() -> dict[str, Any]:
+    """Expose the active configuration (sanitised — no secrets)."""
+    cfg = get_config()
+    return {
+        "scoring": {
+            "recovery_window": cfg.scoring.recovery_window,
+            "no_recovery_multiplier": cfg.scoring.no_recovery_multiplier,
+            "frequency_weight": cfg.scoring.frequency_weight,
+            "severity_weight": cfg.scoring.severity_weight,
+            "weights": cfg.scoring.weights,
+        },
+        "storage": {"db_path": cfg.storage.db_path},
+        "alerting": {
+            # Don't leak the webhook URL — just whether one is configured.
+            "enabled": bool(cfg.alerting.webhook_url),
+            "threshold": cfg.alerting.threshold,
+            "cooldown_seconds": cfg.alerting.cooldown_seconds,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -508,13 +717,33 @@ async def event_count() -> dict[str, int]:
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host.")
 @click.option("--port", default=8000, show_default=True, help="Bind port.")
 @click.option("--reload", is_flag=True, default=False, help="Auto-reload on file changes.")
-def serve(host: str, port: int, reload: bool) -> None:
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to a triage.toml config file.",
+)
+@click.option(
+    "--db",
+    "db_path",
+    default=None,
+    help="SQLite database path (overrides config; defaults to in-memory).",
+)
+def serve(host: str, port: int, reload: bool, config_path: Path | None, db_path: str | None) -> None:
     """Start the agent-triage web dashboard.
 
     Open http://localhost:8000 in your browser to see the dashboard.
     Upload NDJSON trace files via the UI or POST to /otlp/v1/traces
     from any OpenTelemetry-instrumented agent.
     """
+    if config_path is not None:
+        os.environ["TRIAGE_CONFIG"] = str(config_path)
+        click.echo(f"Using config: {config_path}", err=True)
+    if db_path is not None:
+        os.environ["TRIAGE_DB_PATH"] = db_path
+        click.echo(f"Using database: {db_path}", err=True)
+
     click.echo(f"Starting agent-triage dashboard on http://{host}:{port}", err=True)
     uvicorn.run(
         "triage.server:app",

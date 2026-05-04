@@ -63,6 +63,7 @@ server = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-asyncio>=0.23",
     "anthropic>=0.40,<2",
     "fastapi>=0.100,<1",
     "uvicorn[standard]>=0.23,<1",
@@ -76,6 +77,7 @@ packages = ["src/triage"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--tb=short"
+asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["src/triage"]

@@ -6,7 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/agent-triage.svg)](https://pypi.org/project/agent-triage/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen.svg)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#development)
 [![mypy: strict](https://img.shields.io/badge/mypy-strict-blue.svg)](https://mypy-lang.org/)
 
 `agent-triage` ingests trace files from multi-agent systems (NDJSON or OpenTelemetry) and produces a ranked "what actually needs your attention this morning" severity report. It ships a CLI, a web dashboard, an OTLP receiver, and optional LLM-generated root-cause narratives.
@@ -29,12 +29,15 @@ The signal you actually need at 9 AM is not "here are 847 events from last night
 ## Features
 
 - **CLI** — pipe NDJSON traces in, get a markdown morning report out
-- **Web dashboard** — interactive UI with charts, severity heatmap, and drill-down
+- **Web dashboard** — interactive UI with severity charts, **7-day trend lines**, and **live updates via Server-Sent Events**
 - **OTLP receiver** — accept OpenTelemetry spans directly from production agents
 - **LLM root-cause analysis** — optional Claude-generated narratives (Haiku 4.5 with prompt caching)
+- **Persistent SQLite storage** — trace data survives restarts; supports time-series queries
+- **Configurable scoring** — tune severity weights, recovery window, and composite formula via `triage.toml`
+- **Webhook alerting** — fire Slack-compatible notifications when a pattern crosses your severity threshold
 - **Docker-ready** — `docker compose up` and you have a dashboard
 - **PyPI-published** — `pip install agent-triage`
-- **Production quality** — 100+ tests, 92%+ coverage, mypy strict, ruff clean
+- **Production quality** — 145+ tests, 91%+ coverage, mypy strict, ruff clean
 
 ---
 
@@ -119,6 +122,66 @@ See [`examples/emit_otlp.py`](examples/emit_otlp.py) for a working end-to-end ex
 
 ---
 
+## Configuration
+
+Create a `triage.toml` to override scoring weights, persistence, and alerting (all sections optional):
+
+```toml
+[scoring]
+recovery_window = 5
+no_recovery_multiplier = 2.0
+
+[scoring.weights]
+coordination_failure = 1.0
+agent_error = 0.8
+
+[storage]
+db_path = "./triage.db"   # use ":memory:" for ephemeral runs
+
+[alerting]
+webhook_url = "https://hooks.slack.com/services/T0000/B0000/XXX"
+threshold = 8.0           # fire when final_score crosses this
+cooldown_seconds = 1800   # don't refire same pattern within this window
+```
+
+Then pass it to either entry point:
+
+```bash
+triage runs/*.ndjson --config triage.toml
+triage-serve --config triage.toml --db ./triage.db
+```
+
+A full annotated example is at [`triage.example.toml`](triage.example.toml).
+
+---
+
+## Live updates
+
+The dashboard subscribes to a Server-Sent Events stream at `/api/stream`. Whenever new spans arrive (via upload or OTLP), connected browsers refresh automatically — no polling, no manual reload. The 7-day trend chart is also re-rendered, so you can see severity climb in real time during an incident.
+
+---
+
+## Webhook alerts
+
+When `[alerting]` is configured, every `/api/report` evaluation checks for patterns whose `final_score` exceeds `threshold` and POSTs a Slack-compatible JSON payload to your webhook. A per-pattern cooldown prevents flooding during a continuous incident:
+
+```json
+{
+  "text": ":rotating_light: Triage alert — score 12.40\n>*[navigator] move / agent_error / position*\n>...",
+  "pattern_id": "navigator-move-agent_error",
+  "agent_id": "navigator",
+  "tool_name": "move",
+  "classification": "agent_error",
+  "final_score": 12.4,
+  "severity_score": 14.0,
+  "recovery_rate": 0.0
+}
+```
+
+Compatible with Slack incoming webhooks, Discord webhooks, PagerDuty Events API v2 (with minor adapter), and any HTTP endpoint that accepts JSON.
+
+---
+
 ## Architecture
 
 ```
@@ -149,7 +212,11 @@ See [`examples/emit_otlp.py`](examples/emit_otlp.py) for a working end-to-end ex
 | `scorer.py` | Score patterns by frequency, severity, and recovery rate |
 | `reporter.py` | Render the morning markdown report |
 | `analyst.py` | Optional Claude-generated root-cause narratives |
-| `server.py` | FastAPI app — dashboard + OTLP receiver |
+| `store.py` | SQLite-backed persistent event store + time-series queries |
+| `streaming.py` | In-process pub/sub for Server-Sent Events |
+| `alerting.py` | Threshold-based webhook alerter with per-pattern cooldown |
+| `config.py` | TOML config loader (`triage.toml`) |
+| `server.py` | FastAPI app — dashboard, OTLP receiver, SSE stream, REST API |
 | `cli.py` | Click-based command-line entry point |
 
 ---
