@@ -19,6 +19,8 @@ keywords = [
     "triage",
     "opentelemetry",
     "otlp",
+    "anthropic",
+    "claude",
     "debugging",
 ]
 classifiers = [

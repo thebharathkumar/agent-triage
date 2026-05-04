@@ -59,13 +59,13 @@ def main() -> None:
     "--ai-analysis",
     is_flag=True,
     default=False,
-    help="Enrich each top incident with an LLM-generated root-cause narrative.",
+    help="Enrich each top incident with a Claude-generated root-cause narrative.",
 )
 @click.option(
     "--api-key",
     default=None,
     envvar="ANTHROPIC_API_KEY",
-    help="API key for the LLM provider (defaults to ANTHROPIC_API_KEY env var).",
+    help="Anthropic API key (defaults to ANTHROPIC_API_KEY env var).",
     show_envvar=True,
 )
 @click.option(

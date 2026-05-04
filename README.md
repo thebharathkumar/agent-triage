@@ -31,7 +31,7 @@ The signal you actually need at 9 AM is not "here are 847 events from last night
 - **CLI** — pipe NDJSON traces in, get a markdown morning report out
 - **Web dashboard** — interactive UI with severity charts, **7-day trend lines**, and **live updates via Server-Sent Events**
 - **OTLP receiver** — accept OpenTelemetry spans directly from production agents
-- **LLM root-cause analysis** — optional model-generated narratives with prompt caching to keep cost low
+- **LLM root-cause analysis** — optional Claude Haiku 4.5-generated narratives with prompt caching to keep cost low
 - **Persistent SQLite storage** — trace data survives restarts; supports time-series queries
 - **Configurable scoring** — tune severity weights, recovery window, and composite formula via `triage.toml`
 - **Webhook alerting** — fire Slack-compatible notifications when a pattern crosses your severity threshold
@@ -294,7 +294,8 @@ Compatible with Slack incoming webhooks, Discord webhooks, PagerDuty Events API 
                                           │
                                           ↓ (optional)
                                   ┌─────────────────┐
-                                  │  LLM (cached)   │──►── Root-cause narrative
+                                  │  Claude Haiku   │
+                                  │  (cached)       │──►── Root-cause narrative
                                   └─────────────────┘
 ```
 
@@ -304,7 +305,7 @@ Compatible with Slack incoming webhooks, Discord webhooks, PagerDuty Events API 
 | `grouper.py` | Cluster events into `IncidentPattern` buckets by signature |
 | `scorer.py` | Score patterns by frequency, severity, and recovery rate |
 | `reporter.py` | Render the morning markdown report |
-| `analyst.py` | Optional LLM-generated root-cause narratives |
+| `analyst.py` | Optional Claude-generated root-cause narratives |
 | `store.py` | SQLite-backed persistent event store + time-series queries |
 | `streaming.py` | In-process pub/sub for Server-Sent Events |
 | `alerting.py` | Threshold-based webhook alerter with per-pattern cooldown |
@@ -492,10 +493,10 @@ anomalous.
 Anomaly detection tells you what is unusual. Severity scoring tells you what matters. A `coordination_failure` that happens on every run is not an anomaly — it's a chronic problem. Scoring surfaces chronic problems alongside rare-but-catastrophic ones using weights that reflect operational cost.
 
 ### Why prompt caching for the LLM?
-Each pattern triggers one model call, but the system prompt is identical across calls. With ephemeral prompt caching, the system prompt is cached server-side after the first call and reused on subsequent ones, cutting per-call cost ~90% for batches of 3+ patterns.
+Each pattern triggers one Claude call, but the system prompt is identical across calls. With Anthropic's `cache_control: ephemeral`, the system prompt is cached server-side after the first call and reused on subsequent ones, cutting per-call cost ~90% for batches of 3+ patterns.
 
 ### Why an embedded HTML dashboard instead of React/Next.js?
-A pitch tool should run in 30 seconds, not 30 minutes. The dashboard ships as a single HTML string with Tailwind + Chart.js via CDN — no build step, no `node_modules`, no `npm install`. Everything is in `src/triage/server.py`. Upgrading to a separate frontend later is straightforward; the backend already returns clean JSON.
+A pitch tool should run in 30 seconds, not 30 minutes. The dashboard ships as a single HTML file with Tailwind + Chart.js via CDN — no build step, no `node_modules`, no `npm install`. The template lives at `src/triage/templates/dashboard.html` and is loaded at server startup. Upgrading to a separate frontend later is straightforward; the backend already returns clean JSON.
 
 ### Why three top incidents?
 Three is the number of things a person can hold in working memory while still being able to act on them. A list of 10 is noise. A list of 1 is overconfident. Three forces the model to prioritize, which is the core value proposition.

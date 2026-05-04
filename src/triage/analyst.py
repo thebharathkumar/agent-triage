@@ -1,9 +1,9 @@
-"""analyst.py - LLM-powered root-cause narratives.
+"""analyst.py - LLM-powered root-cause narratives via the Anthropic API.
 
-The implementation calls the ``anthropic`` SDK because that's the
-provider we ship a built-in adapter for. Swapping providers is a matter
-of replacing this module — the rest of the pipeline only consumes
-``AnalysisResult`` objects.
+Calls Claude Haiku 4.5 with prompt caching on the system prompt so
+batched analysis (top-N patterns per report) hits the cache after the
+first request. Swapping providers is a matter of replacing this module
+— the rest of the pipeline only consumes ``AnalysisResult`` objects.
 """
 
 from __future__ import annotations
@@ -36,12 +36,12 @@ class AnalysisResult:
 
 
 def analyze_pattern(sp: ScoredPattern, *, api_key: str | None = None) -> AnalysisResult:
-    """Send a scored pattern to the LLM and return a root-cause narrative.
+    """Send a scored pattern to Claude and return a root-cause narrative.
 
     Requires the ``anthropic`` package (``pip install 'triage[ai]'``) and
     an ``ANTHROPIC_API_KEY`` environment variable (or pass ``api_key``).
-    Uses Haiku with prompt caching on the system prompt to keep
-    per-call cost low.
+    Uses ``claude-haiku-4-5`` with prompt caching on the system prompt to
+    keep per-call cost low.
     """
     try:
         import anthropic
@@ -115,7 +115,7 @@ def analyze_patterns(
 ) -> dict[str, AnalysisResult]:
     """Analyze up to ``top_n`` patterns concurrently and return results keyed by pattern_id.
 
-    The underlying SDK call is synchronous, so we fan out across worker
+    The Anthropic SDK call is synchronous, so we fan out across worker
     threads. With prompt caching on the system prompt, the first request
     primes the cache and subsequent requests hit it in parallel.
     """
