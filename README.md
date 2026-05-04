@@ -6,13 +6,12 @@
 [![PyPI](https://img.shields.io/pypi/v/agent-triage.svg)](https://pypi.org/project/agent-triage/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](#development)
+[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen.svg)](#development)
 [![mypy: strict](https://img.shields.io/badge/mypy-strict-blue.svg)](https://mypy-lang.org/)
 
 `agent-triage` ingests trace files from multi-agent systems (NDJSON or OpenTelemetry) and produces a ranked "what actually needs your attention this morning" severity report. It ships a CLI, a web dashboard, an OTLP receiver, and optional LLM-generated root-cause narratives.
 
-<!-- Replace this with a real screenshot once you've taken one: -->
-<!-- ![Dashboard preview](docs/dashboard.png) -->
+![Dashboard preview](docs/dashboard.png)
 
 ---
 
